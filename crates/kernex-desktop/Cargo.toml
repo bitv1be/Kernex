@@ -1,0 +1,10 @@
+[package]
+name = "kernex-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+agent-core = { package = "kernex-agent-core", path = "../agent-core" }
+eframe.workspace = true
+tokio.workspace = true
