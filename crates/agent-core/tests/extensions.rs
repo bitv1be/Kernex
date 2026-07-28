@@ -68,7 +68,7 @@ async fn mcp_stdio_round_trip() {
         .await
         .unwrap();
     assert_eq!(response["structuredContent"]["value"], "hello");
-    drop(client);
+    client.terminate().await.unwrap();
     cleanup(&root);
 }
 
@@ -157,7 +157,7 @@ async fn lsp_content_length_round_trip() {
     .unwrap();
     let symbols = client.document_symbols("src/lib.rs").await.unwrap();
     assert_eq!(symbols[0]["name"], "FixtureSymbol");
-    drop(client);
+    client.terminate().await.unwrap();
     cleanup(&root);
 }
 

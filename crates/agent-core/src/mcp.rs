@@ -180,6 +180,14 @@ impl McpClient {
         self.server_info.as_ref()
     }
 
+    /// Terminates the server and waits for its process to release workspace resources.
+    pub async fn terminate(mut self) -> Result<(), McpError> {
+        if self.child.try_wait()?.is_none() {
+            self.child.kill().await?;
+        }
+        Ok(())
+    }
+
     pub async fn list_tools(&mut self) -> Result<Vec<McpTool>, McpError> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;

@@ -169,6 +169,14 @@ impl LspClient {
         .await
     }
 
+    /// Terminates the server and waits for its process to release workspace resources.
+    pub async fn terminate(mut self) -> Result<(), LspError> {
+        if self.child.try_wait()?.is_none() {
+            self.child.kill().await?;
+        }
+        Ok(())
+    }
+
     pub async fn request(&mut self, method: &str, params: Value) -> Result<Value, LspError> {
         tokio::time::timeout(
             Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
