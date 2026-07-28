@@ -1,28 +1,36 @@
 # Security Model
 
-Kernex assumes model output, repository content, plugin manifests, MCP servers, and language servers may be untrusted. The user and operating system remain the security principals.
+Kernex assumes model output, repository content, plugin manifests, MCP servers, language servers, and remote providers may be untrusted. The user and operating system remain the security principals.
 
 ## Enforced controls
 
-- Filesystem tools canonicalize the project root and reject absolute escapes, `..` traversal, and symlinks resolving outside the project.
-- File mutations require approval, include the proposed diff in the permission request, and use same-directory atomic replacement while preserving existing permissions.
-- Commands are launched as a program plus argument vector, never by implicit shell evaluation.
-- Command runtime and captured output are bounded. Destructive programs, shells, and mutating Git operations receive elevated risk labels.
+- Filesystem tools canonicalize the project root and reject absolute escapes, parent traversal, and symlinks resolving outside the project.
+- File mutations require approval, include the proposed diff, and use same-directory atomic replacement while preserving existing permissions.
+- Commands are launched as a program plus argument vector, never by implicit shell evaluation. Runtime and captured output are bounded; child processes are killed when their future is dropped.
+- Destructive programs, shells, mutating Git operations, commands, writes, network calls, credentials, MCP servers, and language servers receive explicit capability/risk labels.
+- Permission modes support read-only, per-operation review, safe-operation automation, and explicit full access. Grants are scoped to a capability/resource for one operation, one session, or one canonical project.
 - Child environments are filtered for names commonly associated with keys, tokens, passwords, authentication, sessions, cookies, and proxies.
-- Provider and extension credentials are configured by environment-variable name. Sharing each credential requires permission.
-- Session grants are scoped to both capability and resource; approving one credential or file does not approve other resources.
 - Common credential paths such as `.env.*`, private keys, and cloud credential directories require secret access, are skipped by search, and are redacted from Git diffs.
-- Model network requests, MCP/LSP startup, MCP tool calls, writes, and commands are visible and permission-gated.
-- Provider response bodies, MCP/LSP messages, extension request time, pagination, command output, and command runtime are bounded.
-- Closing the desktop application or pressing Cancel denies pending approvals and interrupts in-flight provider and tool futures; spawned commands are configured to terminate when their future is dropped.
-- Edit events record the target and byte counts rather than duplicating complete file bodies; the resulting diff remains available for review.
+- Provider response bodies, extension messages, pagination, command output, and runtime are bounded.
+- Closing the desktop application, pressing Cancel, or Ctrl+C cancels provider/tool futures and rejects pending desktop approvals.
+- The Tauri webview can invoke only declared commands under the application capability file; it has no generic filesystem or shell API.
+
+## Credential handling
+
+Stored API keys and OAuth tokens use the operating system keyring through the `keyring` crate: Windows Credential Manager, macOS Keychain, or Linux Secret Service. Normal configuration contains only named profile metadata and environment-variable references. `SecretValue` redacts `Debug`, has no serialization implementation, uses constant-time equality, and zeroizes its allocation on drop.
+
+OAuth uses Authorization Code with PKCE, a cryptographically random verifier and state value, a loopback callback listener, exact state validation, browser launch, token exchange, expiry tracking, refresh-token rotation, and deletion on logout. Kernex enables a built-in flow only for Google Gemini; a custom flow requires endpoints supplied from that provider's official public-client documentation. It does not imitate or reuse private application login flows.
+
+Credentials are not placed in project configuration, source, session SQLite records, diagnostics, or model messages. Environment-based profiles retain only the variable name and resolve its value at request time.
 
 ## Important limitations
 
-Approval is not an operating-system sandbox. An approved executable runs with the user's OS account and can access resources that account can access. Working-directory confinement does not constrain the executable itself. Review the exact command, arguments, risk label, and extension source before approval.
+Approval is not an operating-system sandbox. An approved executable runs with the user's OS account and can access anything that account can access; working-directory confinement does not constrain the executable itself. Review the exact command, arguments, risk label, diff, and extension source before approval. `full-access` should be reserved for already trusted workspaces.
 
-Environment-name filtering is defense in depth, not a guarantee that a value is non-sensitive. Do not store secrets in repository files or ordinary environment variables with misleading names. A model provider receives the conversation and relevant tool results after network approval; apply the provider's own data-handling policy.
+Native keyring security depends on the platform service and logged-in desktop session. Linux headless machines may not provide Secret Service; use an environment-variable profile there and protect the process environment. Environment-name filtering is defense in depth and cannot prove that an oddly named value is harmless.
 
-MCP servers and plugins are executable software. Keep project configuration under review, pin extension versions outside Kernex where possible, and grant session-wide permissions only to trusted components.
+A model provider receives the conversation and relevant tool results after network approval. Apply that provider's data-handling and billing policies. OAuth refresh can detect HTTP/token failures, but a provider may expose revocation only when the next refresh or API request occurs.
+
+MCP servers and plugins are executable software. Keep project configuration under review, pin external versions where possible, and grant persistent permissions only to trusted components.
 
 Do not include credentials or private data in public vulnerability reports. Contact repository maintainers privately before publishing a security issue.

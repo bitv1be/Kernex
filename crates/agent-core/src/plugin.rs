@@ -6,6 +6,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::command::{CommandError, CommandRunner, CommandSpec};
+use crate::permission::{Capability, RiskLevel};
 use crate::provider::ToolDefinition;
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -154,6 +155,11 @@ impl PluginRegistry {
                         name: qualified_name.clone(),
                         description: tool.description,
                         input_schema,
+                        output_schema: json!({"type": ["object", "array", "string"]}),
+                        risk_level: RiskLevel::High,
+                        permission: Capability::ExecuteCommand,
+                        supports_cancellation: true,
+                        timeout_seconds: Some(120),
                     },
                     qualified_name,
                     program: tool.command,

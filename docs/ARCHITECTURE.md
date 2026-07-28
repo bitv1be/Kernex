@@ -1,28 +1,48 @@
 # Architecture
 
-Kernex is a Cargo workspace with three presentation/runtime layers:
+Kernex is a Rust 2024 workspace with two presentation layers and one shared business-logic crate:
 
-- `kernex-cli` (repository root) parses commands, renders progress, and asks for terminal approvals.
-- `kernex-desktop` provides a native eframe UI with task configuration, a live action timeline, approval controls, diff review, results, and cancellation.
-- `kernex-agent-core` owns all provider, agent, workspace, tool, permission, and extension behavior. Neither host reimplements agent logic.
+- `kernex-cli` at the repository root owns terminal parsing, rendering, prompts, and Ctrl+C handling.
+- `kernex-desktop` is a Tauri 2 native host. Its React/TypeScript frontend lives in `crates/kernex-desktop/ui` and communicates with Rust through typed commands and events.
+- `kernex-agent-core` owns agent execution, provider protocols, authentication, SQLite sessions, global/project settings, project context, tools, permissions, filesystem access, commands, Git, MCP, LSP, and plugins.
+
+Neither host implements a second agent loop. Both assemble a run through `runtime::run_agent_turn`, provide an `Approver` and `EventSink`, and use the same session/authentication stores.
 
 ## Agent flow
 
-1. The host opens and canonicalizes one project root.
-2. The core discovers repository instructions and configured extensions.
-3. A provider-neutral request is translated to OpenAI-compatible, Anthropic, or Gemini wire formats.
-4. Model tool calls are normalized into `ToolCall` values.
-5. `Toolbox` validates paths, requests permission where required, executes the action, and emits a reviewable event.
-6. Results return to the model until it produces a final answer, the user cancels, or the step limit is reached.
+1. The host canonicalizes the selected workspace and loads global plus `.kernex/config.toml` settings.
+2. The core discovers scoped repository instructions and configured extensions.
+3. The authentication layer resolves only the selected credential profile; the provider receives a short-lived secret wrapper rather than persisted secret text.
+4. A provider-neutral request is translated to OpenAI-compatible, Anthropic, or Gemini wire formats and consumed as a stream when supported.
+5. Model tool calls are normalized into `ToolCall` values and dispatched only through the registered `Toolbox` definitions.
+6. The permission gate evaluates mode, risk, resource-scoped session grants, and canonical-project grants before protected work.
+7. Tool results return to the model until a final response, cancellation, or the configured step limit.
+8. `SessionRecorder` persists structured transitions to SQLite while forwarding the same events to the active UI.
 
-All meaningful transitions are emitted through `EventSink`, allowing the CLI and desktop application to show the same action history.
+`EventSink` carries model progress, streamed text, tool starts/results/errors, diffs, usage, and completion. Tauri converts those events into window events; the CLI renders them directly.
 
-## Project intelligence
+## Core modules
 
-`ProjectIndex` walks the project with `.gitignore` support and provides bounded literal search. The toolbox reuses that snapshot during a run and invalidates it after edits or commands, avoiding repeated full-tree walks without returning stale agent-authored changes. `GitRepository` reports status and diffs, including untracked text files. `SyntaxAnalyzer` uses tree-sitter for Rust, Python, JavaScript, TypeScript/TSX, and Go structural outlines. Configured LSP servers add semantic document symbols through standard JSON-RPC framing.
+- `agent.rs`: provider-independent loop and built-in registered tools.
+- `runtime.rs`: shared host assembly for a complete agent turn.
+- `provider.rs`: common model interface, wire-format adapters, SSE normalization, usage, and capabilities.
+- `auth.rs`: named profiles, PKCE OAuth, refresh/logout, secret wrappers, and native keyring access.
+- `session.rs`: shared SQLite records and permission/event auditing.
+- `permission.rs`: modes, scoped grants, project grants, and risk decisions.
+- `workspace.rs`, `diff.rs`, `command.rs`, and `git.rs`: confined local operations and reviewable changes.
+- `instructions.rs`, `index.rs`, and `syntax.rs`: project context and structural inspection.
+- `mcp.rs`, `lsp.rs`, and `plugin.rs`: explicitly configured extension processes.
 
-## Extension boundaries
+## Desktop boundary
 
-MCP clients launch permissioned stdio server processes, negotiate protocol version `2025-11-25`, discover tools, and expose namespaced tool definitions to the model. Declarative process plugins use names such as `plugin__quality__audit`; they execute through the same command runner and permission policy as built-in command tools.
+The webview has no direct filesystem or process access. Tauri commands expose only bounded operations such as workspace overview, project-file reads, Git inspection, permissioned terminal execution, shared sessions/settings, authentication, and agent start/cancel. Risky operations still use the core permission system. The frontend uses Zustand for transient UI state and TanStack Query for backend state; CodeMirror renders source, xterm.js renders terminal output, and React Markdown renders streamed answers.
 
-Secrets are represented by environment-variable names in configuration. Values are resolved only immediately before an approved provider or extension request and are not serialized into configuration, events, or model messages.
+## Sessions and configuration
+
+`directories::ProjectDirs` selects platform-native user locations. `sessions.sqlite3` is the compatibility boundary between CLI and desktop. Ordinary configuration stores provider/model/base URL, an authentication-profile name, permission mode, theme, and recent projects. Project configuration stores provider overrides and extension commands. Secret values are never serialized into these files or into session records.
+
+## Project intelligence and extensions
+
+`ProjectIndex` respects ignore rules and provides bounded search. The toolbox invalidates its cached index after edits or commands. `GitRepository` reports status, bounded log, and diffs including untracked text. Tree-sitter supports Rust, Python, JavaScript, TypeScript/TSX, and Go outlines; configured LSP servers add semantic symbols.
+
+MCP clients launch permissioned stdio processes, negotiate protocol `2025-11-25`, paginate tool discovery defensively, and expose namespaced tools. Declarative process plugins use names such as `plugin__quality__audit`; both share the command runner and permission policy.

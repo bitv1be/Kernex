@@ -19,7 +19,8 @@ use crate::permission::{
 use crate::plugin::{PluginError, PluginRegistry};
 use crate::project::{ProjectError, ProjectIndex};
 use crate::provider::{
-    CompletionRequest, Message, ModelProvider, ProviderError, Role, ToolCall, ToolDefinition,
+    CompletionRequest, Message, ModelProvider, ProviderError, ProviderStreamEvent,
+    ProviderStreamSink, Role, TokenUsage, ToolCall, ToolDefinition,
 };
 use crate::syntax::{SyntaxAnalyzer, SyntaxError};
 use crate::workspace::{Workspace, WorkspaceError};
@@ -37,6 +38,10 @@ pub enum AgentEvent {
     },
     ModelRequested {
         step: usize,
+    },
+    ModelDelta {
+        step: usize,
+        event: ProviderStreamEvent,
     },
     ModelResponded {
         step: usize,
@@ -118,6 +123,8 @@ pub enum ToolError {
     DuplicateToolName(String),
     #[error("project index cache is unavailable")]
     IndexCache,
+    #[error("no supported project command for {operation}")]
+    NoProjectCommand { operation: String },
     #[error("could not serialize tool result: {0}")]
     Serialize(#[from] serde_json::Error),
 }
@@ -195,6 +202,11 @@ impl Toolbox {
                             format!("MCP tool {} from server {}", remote.name, server_name)
                         }),
                         input_schema: remote.input_schema,
+                        output_schema: json!({"type": ["object", "array", "string"]}),
+                        risk_level: RiskLevel::High,
+                        permission: Capability::ExecuteCommand,
+                        supports_cancellation: true,
+                        timeout_seconds: Some(120),
                     },
                     qualified_name,
                     remote_name: remote.name,
@@ -244,6 +256,19 @@ impl Toolbox {
                 }),
             ),
             tool(
+                "list_directory",
+                "List files below a project directory, optionally recursively, while respecting ignore rules.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "recursive": {"type": "boolean"},
+                        "max_entries": {"type": "integer", "minimum": 1, "maximum": 10000}
+                    },
+                    "additionalProperties": false
+                }),
+            ),
+            tool(
                 "read_file",
                 "Read a UTF-8 text file inside the project.",
                 json!({
@@ -256,6 +281,20 @@ impl Toolbox {
             tool(
                 "search_files",
                 "Search project text and return file, line, column, and preview.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "case_sensitive": {"type": "boolean"},
+                        "max_results": {"type": "integer", "minimum": 1, "maximum": 500}
+                    },
+                    "required": ["query"],
+                    "additionalProperties": false
+                }),
+            ),
+            tool(
+                "search_code",
+                "Search source and project text and return bounded file, line, column, and preview records.",
                 json!({
                     "type": "object",
                     "properties": {
@@ -281,8 +320,36 @@ impl Toolbox {
                 }),
             ),
             tool(
+                "create_file",
+                "Create a new UTF-8 project file after showing its complete diff; fail if it already exists.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"}
+                    },
+                    "required": ["path", "content"],
+                    "additionalProperties": false
+                }),
+            ),
+            tool(
                 "replace_in_file",
                 "Replace an exact text span in a project file after showing the resulting diff for approval.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "old": {"type": "string"},
+                        "new": {"type": "string"},
+                        "replace_all": {"type": "boolean"}
+                    },
+                    "required": ["path", "old", "new"],
+                    "additionalProperties": false
+                }),
+            ),
+            tool(
+                "apply_patch",
+                "Apply one exact replacement to a project file after showing the resulting diff.",
                 json!({
                     "type": "object",
                     "properties": {
@@ -311,6 +378,21 @@ impl Toolbox {
                 }),
             ),
             tool(
+                "run_command",
+                "Run a program and explicit argument vector inside the project with bounded output and timeout.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "program": {"type": "string"},
+                        "args": {"type": "array", "items": {"type": "string"}},
+                        "cwd": {"type": "string"},
+                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}
+                    },
+                    "required": ["program"],
+                    "additionalProperties": false
+                }),
+            ),
+            tool(
                 "git_status",
                 "Show concise read-only Git status.",
                 object_without_properties(),
@@ -324,6 +406,19 @@ impl Toolbox {
                     "additionalProperties": false
                 }),
             ),
+            tool(
+                "git_log",
+                "Show a bounded, read-only Git commit history.",
+                json!({
+                    "type": "object",
+                    "properties": {"max_entries": {"type": "integer", "minimum": 1, "maximum": 200}},
+                    "additionalProperties": false
+                }),
+            ),
+            project_command_tool("run_tests", "Run the project's detected test command."),
+            project_command_tool("run_build", "Run the project's detected build command."),
+            project_command_tool("run_formatter", "Run the project's detected formatter."),
+            project_command_tool("run_linter", "Run the project's detected linter."),
             tool(
                 "syntax_outline",
                 "Parse a source file with tree-sitter and return named structural symbols and line ranges.",
@@ -367,6 +462,57 @@ impl Toolbox {
                     "truncated": total_files > files.len(),
                 }))?))
             }
+            "list_directory" => {
+                let args: ListDirectoryArgs = parse_args(call)?;
+                let directory = args.path.unwrap_or_else(|| ".".into());
+                self.authorize_read(
+                    Capability::SearchFiles,
+                    "list project directory",
+                    &directory,
+                )?;
+                let resolved = self.workspace.resolve_existing(&directory)?;
+                if !resolved.is_dir() {
+                    return Err(ToolError::Workspace(WorkspaceError::NotDirectory(resolved)));
+                }
+                let display_path = self.workspace.display_path(&resolved);
+                let prefix = if display_path == "." {
+                    String::new()
+                } else {
+                    display_path.trim_matches('/').to_owned()
+                };
+                let prefix_with_separator = (!prefix.is_empty()).then(|| format!("{prefix}/"));
+                let max_entries = args.max_entries.unwrap_or(DEFAULT_LIST_LIMIT).min(10_000);
+                let mut entries = std::collections::BTreeSet::new();
+                let index = self.project_index()?;
+                for file in index.files() {
+                    let relative = match &prefix_with_separator {
+                        Some(prefix) => match file.path.strip_prefix(prefix) {
+                            Some(relative) => relative,
+                            None => continue,
+                        },
+                        None => file.path.as_str(),
+                    };
+                    let entry = if args.recursive {
+                        file.path.clone()
+                    } else if let Some((directory, _)) = relative.split_once('/') {
+                        match &prefix_with_separator {
+                            Some(prefix) => format!("{prefix}{directory}/"),
+                            None => format!("{directory}/"),
+                        }
+                    } else {
+                        file.path.clone()
+                    };
+                    entries.insert(entry);
+                    if entries.len() == max_entries {
+                        break;
+                    }
+                }
+                Ok(result(serde_json::to_string_pretty(&json!({
+                    "path": display_path,
+                    "entries": entries,
+                    "truncated": entries.len() == max_entries,
+                }))?))
+            }
             "read_file" => {
                 let args: ReadFileArgs = parse_args(call)?;
                 let resolved = self.workspace.resolve_existing(&args.path)?;
@@ -386,7 +532,7 @@ impl Toolbox {
                 let content = self.workspace.read_text(&resolved)?;
                 Ok(result(content))
             }
-            "search_files" => {
+            "search_files" | "search_code" => {
                 let args: SearchFilesArgs = parse_args(call)?;
                 self.authorize_read(Capability::SearchFiles, "search project files", &args.query)?;
                 let index = self.project_index()?;
@@ -412,7 +558,21 @@ impl Toolbox {
                     diff: Some(change.diff),
                 })
             }
-            "replace_in_file" => {
+            "create_file" => {
+                let args: WriteFileArgs = parse_args(call)?;
+                let change = self.editor.create_text(&args.path, &args.content)?;
+                self.invalidate_project_index();
+                Ok(ToolExecution {
+                    content: json!({
+                        "path": change.path,
+                        "bytes": change.after.len(),
+                        "created": true,
+                    })
+                    .to_string(),
+                    diff: Some(change.diff),
+                })
+            }
+            "replace_in_file" | "apply_patch" => {
                 let args: ReplaceInFileArgs = parse_args(call)?;
                 let change =
                     self.editor
@@ -428,7 +588,7 @@ impl Toolbox {
                     diff: Some(change.diff),
                 })
             }
-            "execute_command" => {
+            "execute_command" | "run_command" => {
                 let args: ExecuteCommandArgs = parse_args(call)?;
                 // Commands may mutate arbitrary project files, including before returning an error.
                 self.invalidate_project_index();
@@ -442,6 +602,18 @@ impl Toolbox {
             "git_diff" => {
                 let args: GitDiffArgs = parse_args(call)?;
                 Ok(result(self.git.diff(args.staged)?.stdout))
+            }
+            "git_log" => {
+                let args: GitLogArgs = parse_args(call)?;
+                Ok(result(self.git.log(args.max_entries.unwrap_or(30))?.stdout))
+            }
+            "run_tests" | "run_build" | "run_formatter" | "run_linter" => {
+                let args: ProjectCommandArgs = parse_args(call)?;
+                self.invalidate_project_index();
+                let mut command = self.project_command(&call.name, args.args)?;
+                command.timeout_seconds = args.timeout_seconds.unwrap_or(600).min(1_800);
+                let output = self.commands.run(&command).await?;
+                Ok(result(serde_json::to_string_pretty(&output)?))
             }
             "syntax_outline" => {
                 let args: ReadFileArgs = parse_args(call)?;
@@ -525,14 +697,97 @@ impl Toolbox {
             *cached = None;
         }
     }
+
+    fn project_command(
+        &self,
+        operation: &str,
+        additional_args: Vec<String>,
+    ) -> Result<CommandSpec, ToolError> {
+        let root = self.workspace.root();
+        let (program, mut args): (&str, Vec<String>) = if root.join("Cargo.toml").is_file() {
+            match operation {
+                "run_tests" => ("cargo", vec!["test".into(), "--workspace".into()]),
+                "run_build" => ("cargo", vec!["build".into(), "--workspace".into()]),
+                "run_formatter" => ("cargo", vec!["fmt".into(), "--all".into()]),
+                "run_linter" => (
+                    "cargo",
+                    vec![
+                        "clippy".into(),
+                        "--workspace".into(),
+                        "--all-targets".into(),
+                        "--all-features".into(),
+                        "--".into(),
+                        "-D".into(),
+                        "warnings".into(),
+                    ],
+                ),
+                _ => {
+                    return Err(ToolError::NoProjectCommand {
+                        operation: operation.into(),
+                    });
+                }
+            }
+        } else if root.join("package.json").is_file() {
+            match operation {
+                "run_tests" => ("npm", vec!["test".into(), "--".into(), "--run".into()]),
+                "run_build" => ("npm", vec!["run".into(), "build".into()]),
+                "run_formatter" => ("npm", vec!["run".into(), "format".into()]),
+                "run_linter" => ("npm", vec!["run".into(), "lint".into()]),
+                _ => {
+                    return Err(ToolError::NoProjectCommand {
+                        operation: operation.into(),
+                    });
+                }
+            }
+        } else {
+            return Err(ToolError::NoProjectCommand {
+                operation: operation.into(),
+            });
+        };
+        args.extend(additional_args);
+        Ok(CommandSpec::new(program, args))
+    }
 }
 
 fn tool(name: &str, description: &str, input_schema: Value) -> ToolDefinition {
+    let (permission, risk_level, timeout_seconds) = match name {
+        "read_file" | "syntax_outline" | "lsp_symbols" => {
+            (Capability::ReadFile, RiskLevel::Low, Some(30))
+        }
+        "list_files" | "list_directory" | "search_files" | "search_code" => {
+            (Capability::SearchFiles, RiskLevel::Low, Some(30))
+        }
+        "git_status" | "git_diff" | "git_log" => (Capability::GitRead, RiskLevel::Low, Some(30)),
+        "write_file" | "create_file" | "replace_in_file" | "apply_patch" => {
+            (Capability::WriteFile, RiskLevel::Medium, Some(30))
+        }
+        _ => (Capability::ExecuteCommand, RiskLevel::Medium, Some(1_800)),
+    };
     ToolDefinition {
         name: name.to_owned(),
         description: description.to_owned(),
         input_schema,
+        output_schema: json!({"type": ["object", "array", "string"]}),
+        risk_level,
+        permission,
+        supports_cancellation: true,
+        timeout_seconds,
     }
+}
+
+fn project_command_tool(name: &str, description: &str) -> ToolDefinition {
+    tool(
+        name,
+        description,
+        json!({
+            "type": "object",
+            "properties": {
+                "args": {"type": "array", "items": {"type": "string"}},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800}
+            },
+            "additionalProperties": false
+        }),
+    )
 }
 
 fn object_without_properties() -> Value {
@@ -573,6 +828,14 @@ fn parse_args<T: for<'de> Deserialize<'de>>(call: &ToolCall) -> Result<T, ToolEr
 #[derive(Debug, Deserialize)]
 struct ListFilesArgs {
     max_files: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListDirectoryArgs {
+    path: Option<String>,
+    #[serde(default)]
+    recursive: bool,
+    max_entries: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -618,11 +881,24 @@ struct GitDiffArgs {
     staged: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitLogArgs {
+    max_entries: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectCommandArgs {
+    #[serde(default)]
+    args: Vec<String>,
+    timeout_seconds: Option<u64>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentRunResult {
     pub final_answer: String,
     pub steps: usize,
     pub messages: Vec<Message>,
+    pub token_usage: TokenUsage,
 }
 
 #[derive(Debug, Error)]
@@ -674,6 +950,14 @@ impl AgentEngine {
     }
 
     pub async fn run(&self, task: impl Into<String>) -> Result<AgentRunResult, AgentError> {
+        self.run_with_history(task, Vec::new()).await
+    }
+
+    pub async fn run_with_history(
+        &self,
+        task: impl Into<String>,
+        history: Vec<Message>,
+    ) -> Result<AgentRunResult, AgentError> {
         let task = task.into();
         if task.trim().is_empty() {
             return Err(AgentError::EmptyTask);
@@ -690,14 +974,20 @@ impl AgentEngine {
             self.toolbox.workspace().root().display()
         );
         let repository_instructions = instructions.render_for_prompt();
-        let mut messages = vec![
-            Message::new(
-                Role::System,
-                format!("{SYSTEM_PROMPT}{workspace_context}{repository_instructions}"),
-            ),
-            Message::new(Role::User, task),
-        ];
+        let system_message = Message::new(
+            Role::System,
+            format!("{SYSTEM_PROMPT}{workspace_context}{repository_instructions}"),
+        );
+        let mut messages = history;
+        if !messages
+            .first()
+            .is_some_and(|message| message.role == Role::System)
+        {
+            messages.insert(0, system_message);
+        }
+        messages.push(Message::new(Role::User, task));
         let tools = self.toolbox.definitions();
+        let mut token_usage = TokenUsage::default();
 
         for step in 1..=self.max_steps {
             if self.cancelled.load(Ordering::Relaxed) {
@@ -706,10 +996,15 @@ impl AgentEngine {
             self.events.emit(AgentEvent::ModelRequested { step });
             let mut request = CompletionRequest::new(messages.clone());
             request.tools = tools.clone();
+            let stream = Arc::new(AgentProviderStream {
+                step,
+                events: self.events.clone(),
+            });
             let response = tokio::select! {
-                response = self.provider.complete(request) => response?,
+                response = self.provider.stream(request, stream) => response?,
                 _ = wait_for_cancellation(&self.cancelled) => return Err(AgentError::Cancelled),
             };
+            token_usage.add(&response.usage);
             self.events.emit(AgentEvent::ModelResponded {
                 step,
                 content: response.content.clone(),
@@ -730,6 +1025,7 @@ impl AgentEngine {
                     final_answer: response.content,
                     steps: step,
                     messages,
+                    token_usage,
                 });
             }
 
@@ -776,6 +1072,20 @@ impl AgentEngine {
     }
 }
 
+struct AgentProviderStream {
+    step: usize,
+    events: Arc<dyn EventSink>,
+}
+
+impl ProviderStreamSink for AgentProviderStream {
+    fn emit(&self, event: ProviderStreamEvent) {
+        self.events.emit(AgentEvent::ModelDelta {
+            step: self.step,
+            event,
+        });
+    }
+}
+
 async fn wait_for_cancellation(cancelled: &AtomicBool) {
     while !cancelled.load(Ordering::Relaxed) {
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -784,7 +1094,7 @@ async fn wait_for_cancellation(cancelled: &AtomicBool) {
 
 fn observable_tool_call(call: &ToolCall) -> ToolCall {
     let arguments = match call.name.as_str() {
-        "write_file" => json!({
+        "write_file" | "create_file" => json!({
             "path": call.arguments.get("path"),
             "content_bytes": call
                 .arguments
@@ -792,7 +1102,7 @@ fn observable_tool_call(call: &ToolCall) -> ToolCall {
                 .and_then(Value::as_str)
                 .map(str::len),
         }),
-        "replace_in_file" => json!({
+        "replace_in_file" | "apply_patch" => json!({
             "path": call.arguments.get("path"),
             "old_bytes": call
                 .arguments
