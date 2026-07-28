@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 144 61% 8%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 4% 18%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 63% 42%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 4% 17%;
+    --input: 240 4% 19%;
+    --ring: 160 84% 39%;
+    --radius: 0.55rem;
+  }
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 4%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 4%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 4%;
+    --primary: 160 84% 32%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 96%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 5% 94%;
+    --accent-foreground: 240 6% 10%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+  }
+  * { @apply border-border; }
+  html, body, #root { @apply h-full overflow-hidden; }
+  body { @apply bg-background text-foreground antialiased; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+  code, pre, .xterm { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+}
+
+.markdown { @apply text-sm leading-7; }
+.markdown p { @apply my-2; }
+.markdown ul { @apply my-2 list-disc pl-5; }
+.markdown ol { @apply my-2 list-decimal pl-5; }
+.markdown pre { @apply my-3 overflow-auto rounded-md border bg-black/35 p-3 text-xs; }
+.markdown code:not(pre code) { @apply rounded bg-muted px-1.5 py-0.5 text-xs; }
+.markdown h1 { @apply mb-3 mt-5 text-xl font-semibold; }
+.markdown h2 { @apply mb-2 mt-4 text-lg font-semibold; }
+.markdown a { @apply text-emerald-400 underline; }
+.diff-add { @apply bg-emerald-500/10 text-emerald-300; }
+.diff-remove { @apply bg-red-500/10 text-red-300; }

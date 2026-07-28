@@ -1,0 +1,15 @@
+{
+  "name": "kernex-workspace",
+  "private": true,
+  "workspaces": [
+    "crates/kernex-desktop/ui"
+  ],
+  "scripts": {
+    "desktop:dev": "npm --workspace @kernex/desktop-ui run tauri dev",
+    "desktop:build": "npm --workspace @kernex/desktop-ui run tauri build",
+    "frontend:build": "npm --workspace @kernex/desktop-ui run build",
+    "frontend:typecheck": "npm --workspace @kernex/desktop-ui run typecheck",
+    "frontend:lint": "npm --workspace @kernex/desktop-ui run lint",
+    "frontend:test": "npm --workspace @kernex/desktop-ui run test"
+  }
+}

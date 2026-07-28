@@ -2,13 +2,14 @@
 
 ## Project Structure & Module Organization
 
-Kernex is a Rust 2024 workspace. `src/main.rs` contains the `kernex` CLI. Shared agent behavior belongs in `crates/agent-core/src/`; keep provider, permission, tool, and protocol concerns in focused modules there. `crates/kernex-desktop/` hosts the native eframe UI and must consume the shared core rather than duplicate it. User-facing architecture and security notes live in `docs/`. The generated `target/` directory remains untracked.
+Kernex is a Rust 2024 workspace. `src/main.rs` contains the `kernex` CLI. Shared agent behavior belongs in `crates/agent-core/src/`; keep provider, authentication, session, permission, tool, and protocol concerns in focused modules there. `crates/kernex-desktop/` hosts the Tauri 2 backend and its React/TypeScript UI in `ui/`; both clients must consume the shared core rather than duplicate it. User-facing architecture and security notes live in `docs/`. Generated `target/`, `node_modules/`, and Vite `dist/` directories remain untracked.
 
 ## Build, Test, and Development Commands
 
 - `cargo run -- inspect` builds the CLI and summarizes this project.
 - `cargo run -- run --provider local --model MODEL "TASK"` exercises the agent against a local compatible endpoint.
-- `cargo run -p kernex-desktop` launches the native desktop application.
+- `npm run desktop:dev` launches the Vite frontend and native Tauri application.
+- `npm run frontend:typecheck`, `npm run frontend:lint`, `npm run frontend:test`, and `npm run frontend:build` validate the desktop frontend.
 - `cargo check` performs a fast type and borrow check without producing a final executable.
 - `cargo build --workspace` builds the CLI, core, and desktop crates.
 - `cargo test --workspace` runs all unit, integration, and documentation tests.

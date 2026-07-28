@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Kernex">
+  <rect width="512" height="512" rx="112" fill="#111827"/>
+  <path d="M136 112h52v288h-52z" fill="#f8fafc"/>
+  <path d="M188 253 318 112h68L252 253l142 147h-72z" fill="#f59e0b"/>
+  <circle cx="376" cy="136" r="28" fill="#f8fafc"/>
+</svg>

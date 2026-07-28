@@ -93,6 +93,20 @@ impl GitRepository {
             .collect())
     }
 
+    pub fn log(&self, max_entries: usize) -> Result<GitOutput, GitError> {
+        let max_entries = max_entries.clamp(1, 200).to_string();
+        self.run_read(
+            "inspect repository history",
+            &[
+                "log",
+                "--date=short",
+                "--pretty=format:%h%x09%ad%x09%an%x09%s",
+                "-n",
+                &max_entries,
+            ],
+        )
+    }
+
     fn run_read(&self, summary: &str, args: &[&str]) -> Result<GitOutput, GitError> {
         self.permissions.authorize(&PermissionRequest {
             capability: Capability::GitRead,

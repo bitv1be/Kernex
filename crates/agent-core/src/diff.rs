@@ -35,6 +35,8 @@ pub enum FileEditError {
     },
     #[error("text to replace was not found in {path}")]
     TextNotFound { path: String },
+    #[error("cannot create {path} because it already exists")]
+    AlreadyExists { path: String },
     #[error(
         "text to replace occurs {count} times in {path}; use replace_all or provide more context"
     )]
@@ -90,6 +92,20 @@ impl FileEditor {
         })
     }
 
+    pub fn create_text(
+        &self,
+        path: impl AsRef<Path>,
+        contents: &str,
+    ) -> Result<FileChange, FileEditError> {
+        let resolved = self.workspace.resolve_for_write(path.as_ref())?;
+        if resolved.exists() {
+            return Err(FileEditError::AlreadyExists {
+                path: self.workspace.display_path(resolved),
+            });
+        }
+        self.write_text(path, contents)
+    }
+
     pub fn replace_text(
         &self,
         path: impl AsRef<Path>,
@@ -123,6 +139,7 @@ fn atomic_write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("target path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())

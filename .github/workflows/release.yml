@@ -84,6 +84,18 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run frontend:build
+      - name: Install Tauri system dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --workspace --release --locked
       - name: Package Unix binaries

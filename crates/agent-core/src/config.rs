@@ -3,11 +3,13 @@ use thiserror::Error;
 
 use crate::lsp::LanguageServerConfig;
 use crate::mcp::McpServerConfig;
+use crate::settings::ProviderSettings;
 use crate::workspace::{Workspace, WorkspaceError};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KernexConfig {
+    pub provider: Option<ProviderSettings>,
     pub mcp_servers: Vec<McpServerConfig>,
     pub language_servers: Vec<LanguageServerEntry>,
 }
@@ -29,13 +31,17 @@ pub enum ConfigError {
 }
 
 impl KernexConfig {
+    pub fn parse(contents: &str) -> Result<Self, ConfigError> {
+        Ok(toml::from_str(contents)?)
+    }
+
     pub fn load(workspace: &Workspace) -> Result<Self, ConfigError> {
         let path = workspace.root().join(".kernex/config.toml");
         if !path.exists() {
             return Ok(Self::default());
         }
         let contents = workspace.read_text(path)?;
-        Ok(toml::from_str(&contents)?)
+        Self::parse(&contents)
     }
 }
 
