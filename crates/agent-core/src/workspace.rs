@@ -85,7 +85,7 @@ impl Workspace {
             .strip_prefix(&self.root)
             .unwrap_or(path.as_ref())
             .to_string_lossy()
-            .into_owned();
+            .replace(std::path::MAIN_SEPARATOR, "/");
         if display.is_empty() {
             ".".to_owned()
         } else {
@@ -193,6 +193,14 @@ mod tests {
             workspace.resolve_existing("../Cargo.toml"),
             Err(WorkspaceError::ParentTraversal(_))
         ));
+    }
+
+    #[test]
+    fn display_paths_use_portable_separators() {
+        let workspace = Workspace::open(env!("CARGO_MANIFEST_DIR")).unwrap();
+        let nested = workspace.root().join("src").join("workspace.rs");
+
+        assert_eq!(workspace.display_path(nested), "src/workspace.rs");
     }
 
     #[cfg(unix)]
