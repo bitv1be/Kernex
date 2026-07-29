@@ -3,6 +3,7 @@ node_modules/
 *.tsbuildinfo
 /crates/kernex-desktop/ui/dist
 /crates/kernex-desktop/gen
+/crates/kernex-desktop/tauri.release.json
 /crates/kernex-desktop/icons/android
 /crates/kernex-desktop/icons/ios
 /crates/kernex-desktop/icons/StoreLogo.png
