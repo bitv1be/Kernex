@@ -1,12 +1,18 @@
-name: Release merged pull request
+name: Build Tauri installers
 
 on:
-  pull_request_target:
-    branches: [master]
-    types: [closed]
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, for example v0.1.0
+        required: true
+        type: string
 
 concurrency:
-  group: release-master
+  group: release-main
   cancel-in-progress: false
 
 permissions: {}
@@ -17,7 +23,6 @@ env:
 jobs:
   prepare:
     name: Choose release version
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -25,15 +30,17 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      target: ${{ steps.version.outputs.target }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
       - id: version
-        name: Choose the next semantic version
+        name: Resolve the release version
         shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           manifest_version="$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"$/\1/p' Cargo.toml | sed -n '1p')"
@@ -42,19 +49,43 @@ jobs:
             exit 1
           fi
 
-          latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
-          if [[ -z "$latest_tag" ]]; then
-            version="$manifest_version"
-          elif [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            next_patch="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
-            version="$(printf '%s\n%s\n' "$manifest_version" "$next_patch" | sort -V | tail -n 1)"
+          requested_tag=""
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            requested_tag="$MANUAL_TAG"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            requested_tag="$GITHUB_REF_NAME"
+          fi
+
+          if [[ -n "$requested_tag" ]]; then
+            if [[ ! "$requested_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Release tag must use the vMAJOR.MINOR.PATCH format: $requested_tag" >&2
+              exit 1
+            fi
+            tag="$requested_tag"
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+            target="$(git rev-parse "refs/tags/$tag^{commit}")"
           else
-            echo "Latest version tag is not semantic: $latest_tag" >&2
-            exit 1
+            if [[ "$GITHUB_REF" != "refs/heads/main" && "$GITHUB_REF" != "refs/heads/master" ]]; then
+              echo "Automatic releases are allowed only from main or master" >&2
+              exit 1
+            fi
+            latest_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | sed -n '1p')"
+            if [[ -z "$latest_tag" ]]; then
+              version="$manifest_version"
+            elif [[ "$latest_tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              next_patch="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+              version="$(printf '%s\n%s\n' "$manifest_version" "$next_patch" | sort -V | tail -n 1)"
+            else
+              echo "Latest version tag is not semantic: $latest_tag" >&2
+              exit 1
+            fi
+            tag="v$version"
+            target="$GITHUB_SHA"
           fi
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.platform }}
@@ -63,67 +94,270 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             platform: linux-x86_64
-            asset: kernex-*.tar.gz
-          - os: macos-latest
-            platform: macos-arm64
-            asset: kernex-*.tar.gz
+            bundles: appimage
+            rust_target: x86_64-unknown-linux-gnu
+            bundle_dir: target/x86_64-unknown-linux-gnu/release/bundle
+            tauri_script: ../../node_modules/.bin/tauri
           - os: windows-latest
             platform: windows-x86_64
-            asset: kernex-*.zip
+            bundles: nsis,msi
+            rust_target: x86_64-pc-windows-msvc
+            bundle_dir: target/x86_64-pc-windows-msvc/release/bundle
+            tauri_script: ../../node_modules/.bin/tauri.cmd
+          - os: macos-latest
+            platform: macos-universal
+            bundles: app,dmg
+            rust_target: universal-apple-darwin
+            bundle_dir: target/universal-apple-darwin/release/bundle
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauri_script: ../../node_modules/.bin/tauri
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
     env:
       KERNEX_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
-      KERNEX_RELEASE_PLATFORM: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Select release commit
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ needs.prepare.outputs.target }}
+        run: |
+          set -euo pipefail
+          if [[ "${ACT:-}" != "true" ]]; then
+            git checkout --detach "$RELEASE_TARGET"
+          fi
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - run: npm run frontend:build
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --workspace --release --locked
-      - name: Package Unix binaries
-        if: runner.os != 'Windows'
+          set -euo pipefail
+          if [[ "${ACT:-}" == "true" ]]; then
+            sudo sed -i \
+              -e 's|http://archive.ubuntu.com/ubuntu|https://mirror.yandex.ru/ubuntu|g' \
+              -e 's|http://security.ubuntu.com/ubuntu|https://mirror.yandex.ru/ubuntu|g' \
+              /etc/apt/sources.list
+          fi
+          sudo apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o Dir::Etc::sourcelist=sources.list \
+            -o Dir::Etc::sourceparts=- \
+            update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            patchelf \
+            xdg-utils \
+            xvfb
+      - name: Ensure rustup is available
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          package="kernex-$KERNEX_RELEASE_VERSION-$KERNEX_RELEASE_PLATFORM"
-          [[ "$(target/release/kernex --version)" == "kernex $KERNEX_RELEASE_VERSION" ]]
-          mkdir package
-          cp target/release/kernex target/release/kernex-desktop package/
-          tar -C package -czf "$package.tar.gz" .
-      - name: Package Windows binaries
+          if ! command -v rustup >/dev/null 2>&1; then
+            rustup_init="$RUNNER_TEMP/rustup-init"
+            curl \
+              --http1.1 \
+              --proto '=https' \
+              --tlsv1.2 \
+              --retry 5 \
+              --retry-all-errors \
+              --connect-timeout 15 \
+              --max-time 60 \
+              --fail \
+              --silent \
+              --show-error \
+              --location \
+              --output "$rustup_init" \
+              https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+            chmod +x "$rustup_init"
+            "$rustup_init" --default-toolchain none -y
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets || matrix.rust_target }}
+      - name: Cache Rust build data
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Create release version overlay
+        run: >-
+          node -e "require('node:fs').writeFileSync('crates/kernex-desktop/tauri.release.json',
+          JSON.stringify({ version: process.env.KERNEX_RELEASE_VERSION }))"
+      - name: Build production installers
+        uses: tauri-apps/tauri-action@v1
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+        with:
+          projectPath: crates/kernex-desktop
+          tauriScript: ${{ matrix.tauri_script }}
+          args: >-
+            --config ./tauri.release.json
+            --target ${{ matrix.rust_target }}
+            --bundles ${{ matrix.bundles }}
+
+      - name: Stage Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="${{ matrix.bundle_dir }}/appimage"
+          mapfile -t appimages < <(find "$bundle_dir" -maxdepth 1 -type f -name '*.AppImage')
+          if [[ "${#appimages[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one AppImage, found %s\n' "${#appimages[@]}" >&2
+            exit 1
+          fi
+          mkdir dist
+          cp "${appimages[0]}" "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.AppImage"
+          chmod +x "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.AppImage"
+
+      - name: Install and smoke test Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/kernex-installed"
+          mkdir -p "$install_dir/home" "$install_dir/runtime"
+          chmod 700 "$install_dir/runtime"
+          cp "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.AppImage" "$install_dir/Kernex.AppImage"
+          chmod +x "$install_dir/Kernex.AppImage"
+          cd "$install_dir"
+          set +e
+          timeout 20s xvfb-run -a env -i \
+            HOME="$install_dir/home" \
+            PATH="/usr/local/bin:/usr/bin:/bin" \
+            XDG_RUNTIME_DIR="$install_dir/runtime" \
+            APPIMAGE_EXTRACT_AND_RUN=1 \
+            ./Kernex.AppImage >smoke.log 2>&1
+          smoke_status=$?
+          set -e
+          if [[ "$smoke_status" -ne 124 ]]; then
+            cat smoke.log
+            echo "Installed AppImage exited unexpectedly with status $smoke_status" >&2
+            exit 1
+          fi
+
+      - name: Stage Windows installers
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $package = "kernex-$env:KERNEX_RELEASE_VERSION-$env:KERNEX_RELEASE_PLATFORM"
-          $reported = & target/release/kernex.exe --version
-          if ($reported -ne "kernex $env:KERNEX_RELEASE_VERSION") {
-            throw "Release binary reported unexpected version: $reported"
+          $ErrorActionPreference = "Stop"
+          $bundleDir = "${{ matrix.bundle_dir }}"
+          $nsis = @(Get-ChildItem (Join-Path $bundleDir "nsis") -File -Filter "*.exe")
+          $msi = @(Get-ChildItem (Join-Path $bundleDir "msi") -File -Filter "*.msi")
+          if ($nsis.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($nsis.Count)"
           }
-          New-Item -ItemType Directory -Path package | Out-Null
-          Copy-Item target/release/kernex.exe, target/release/kernex-desktop.exe package/
-          Compress-Archive -Path package/* -DestinationPath "$package.zip"
-      - uses: actions/upload-artifact@v4
+          if ($msi.Count -ne 1) {
+            throw "Expected exactly one MSI installer, found $($msi.Count)"
+          }
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item $nsis[0].FullName "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64-setup.exe"
+          Copy-Item $msi[0].FullName "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64.msi"
+
+      - name: Install and smoke test Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Resolve-Path "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64-setup.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP "kernex-installed"
+          $install = Start-Process $installer -ArgumentList "/S", "/D=$installDir" -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            throw "NSIS installer exited with code $($install.ExitCode)"
+          }
+          $apps = @(Get-ChildItem $installDir -Recurse -File -Filter "kernex-desktop.exe")
+          if ($apps.Count -ne 1) {
+            throw "Expected one installed Kernex executable, found $($apps.Count)"
+          }
+          $app = Start-Process $apps[0].FullName -WorkingDirectory $installDir -PassThru
+          Start-Sleep -Seconds 15
+          if ($app.HasExited) {
+            throw "Installed Kernex application exited with code $($app.ExitCode)"
+          }
+          Stop-Process -Id $app.Id
+
+      - name: Stage macOS packages
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="${{ matrix.bundle_dir }}"
+          dmgs=("$bundle_dir"/dmg/*.dmg)
+          apps=("$bundle_dir"/macos/*.app)
+          if [[ ! -f "${dmgs[0]}" || "${#dmgs[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one DMG, found %s\n' "${#dmgs[@]}" >&2
+            exit 1
+          fi
+          if [[ ! -d "${apps[0]}" || "${#apps[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one app bundle, found %s\n' "${#apps[@]}" >&2
+            exit 1
+          fi
+          mkdir dist
+          cp "${dmgs[0]}" "dist/Kernex-$KERNEX_RELEASE_VERSION-macos-universal.dmg"
+          tar -C "$bundle_dir/macos" -czf \
+            "dist/Kernex-$KERNEX_RELEASE_VERSION-macos-universal.app.tar.gz" \
+            "$(basename "${apps[0]}")"
+
+      - name: Install and smoke test macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mount_dir="$RUNNER_TEMP/kernex-dmg"
+          install_dir="$RUNNER_TEMP/kernex-installed"
+          mkdir -p "$mount_dir" "$install_dir"
+          hdiutil attach \
+            "dist/Kernex-$KERNEX_RELEASE_VERSION-macos-universal.dmg" \
+            -mountpoint "$mount_dir" \
+            -nobrowse \
+            -quiet
+          cleanup() {
+            hdiutil detach "$mount_dir" -quiet || true
+          }
+          trap cleanup EXIT
+          apps=("$mount_dir"/*.app)
+          if [[ ! -d "${apps[0]}" || "${#apps[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one app in the DMG, found %s\n' "${#apps[@]}" >&2
+            exit 1
+          fi
+          ditto "${apps[0]}" "$install_dir/Kernex.app"
+          plutil -lint "$install_dir/Kernex.app/Contents/Info.plist"
+          test -x "$install_dir/Kernex.app/Contents/MacOS/kernex-desktop"
+          "$install_dir/Kernex.app/Contents/MacOS/kernex-desktop" >"$install_dir/smoke.log" 2>&1 &
+          app_pid=$!
+          sleep 15
+          if ! kill -0 "$app_pid" 2>/dev/null; then
+            wait "$app_pid" || true
+            cat "$install_dir/smoke.log"
+            echo "Installed macOS application exited unexpectedly" >&2
+            exit 1
+          fi
+          kill "$app_pid"
+          wait "$app_pid" || true
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: kernex-${{ matrix.platform }}
-          path: ${{ matrix.asset }}
+          name: Kernex-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
+          path: dist/*
           if-no-files-found: error
           retention-days: 1
 
@@ -131,35 +365,93 @@ jobs:
     name: Publish ${{ needs.prepare.outputs.tag }}
     needs: [prepare, build]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
-      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@v7
         with:
-          pattern: kernex-*
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select release commit
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ needs.prepare.outputs.target }}
+        run: |
+          set -euo pipefail
+          if [[ "${ACT:-}" != "true" ]]; then
+            git checkout --detach "$RELEASE_TARGET"
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Kernex-${{ needs.prepare.outputs.version }}-*
           path: dist
           merge-multiple: true
+      - name: Verify complete installer set
+        shell: bash
+        run: .github/scripts/verify-release-assets.sh dist "$RELEASE_VERSION"
       - name: Create checksums
         shell: bash
         run: |
           set -euo pipefail
-          cd dist
-          sha256sum kernex-* > SHA256SUMS
-      - name: Publish GitHub release
+          (
+            cd dist
+            sha256sum Kernex-* | LC_ALL=C sort -k2 > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          .github/scripts/verify-release-assets.sh dist "$RELEASE_VERSION"
+      - name: Upload complete draft release
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" dist/* \
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq '.isDraft')"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "Release $RELEASE_TAG already exists and is published" >&2
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "${{ needs.prepare.outputs.target }}" \
+              --title "Kernex $RELEASE_TAG" \
+              --notes "Production desktop installers for Kernex." \
+              --generate-notes \
+              --fail-on-no-commits \
+              --draft
+          fi
+      - name: Download and verify draft release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir remote-release
+          gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --target "$MERGE_SHA" \
-            --title "Kernex $RELEASE_TAG" \
-            --notes "Automatically published after merging pull request #$PR_NUMBER." \
-            --generate-notes \
-            --fail-on-no-commits
+            --dir remote-release \
+            --pattern 'Kernex-*' \
+            --pattern SHA256SUMS
+          .github/scripts/verify-release-assets.sh remote-release "$RELEASE_VERSION"
+      - name: Publish verified release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --latest
+          is_draft="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft \
+            --jq '.isDraft')"
+          [[ "$is_draft" == "false" ]]

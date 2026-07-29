@@ -9,7 +9,7 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "tauri": "tauri --config ../tauri.conf.json"
+    "tauri": "cd .. && tauri"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

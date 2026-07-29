@@ -57,11 +57,20 @@ npm run desktop:dev
 
 Create a production application bundle with:
 
-```bash
-npm run desktop:build
-```
+    npm run desktop:build
 
 The desktop interface includes recent-project selection, shared session history, streaming chat, file and code views, Git status/diffs/log, a permissioned terminal, tool activity, approval dialogs, provider and model settings, authentication profiles, project MCP/LSP visibility, diagnostics, and light/dark themes.
+
+## Releases
+
+Merges to `main` automatically build, install, smoke test, and publish native desktop packages for each supported platform; the current `master` default branch remains supported during migration. The same workflow also accepts pushed semantic tags such as `v0.1.0` and manual runs that name an existing semantic tag. A release is published only after all required packages are present and their downloaded copies pass the release-asset verifier:
+
+- Kernex-VERSION-linux-x86_64.AppImage;
+- Kernex-VERSION-windows-x86_64-setup.exe and Kernex-VERSION-windows-x86_64.msi;
+- Kernex-VERSION-macos-universal.dmg and a complete Kernex-VERSION-macos-universal.app.tar.gz application bundle;
+- SHA256SUMS for every downloadable package.
+
+The Windows installers include the offline WebView2 installer. Published packages contain the production frontend and do not require Node.js, Rust, a development server, the source tree, or project dependency directories at runtime.
 
 ## Authentication and providers
 
