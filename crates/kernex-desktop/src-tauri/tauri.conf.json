@@ -16,9 +16,10 @@
         "title": "Kernex",
         "width": 1440,
         "height": 900,
-        "minWidth": 1024,
-        "minHeight": 680,
+        "minWidth": 760,
+        "minHeight": 560,
         "resizable": true,
+        "decorations": false,
         "fullscreen": false
       }
     ],

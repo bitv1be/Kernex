@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "./App";
 import "./index.css";
 
+// Keep the first paint dark while persisted settings load from the native core.
+document.documentElement.classList.add("dark");
+
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 10_000 } } });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

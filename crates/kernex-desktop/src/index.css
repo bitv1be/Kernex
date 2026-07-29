@@ -4,164 +4,237 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --background: #ffffff;
-    --foreground: #0a0a0a;
+    --foreground: #171717;
     --card: #ffffff;
-    --card-foreground: #0a0a0a;
+    --card-foreground: #171717;
     --popover: #ffffff;
-    --popover-foreground: #0a0a0a;
+    --popover-foreground: #171717;
     --primary: #171717;
     --primary-foreground: #fafafa;
-    --secondary: #f5f5f5;
-    --secondary-foreground: #171717;
-    --muted: #f5f5f5;
-    --muted-foreground: #737373;
-    --accent: #f5f5f5;
-    --accent-foreground: #171717;
-    --destructive: #e7000b;
-    --destructive-foreground: #ffffff;
-    --border: #e5e5e5;
-    --input: #e5e5e5;
-    --ring: #a1a1a1;
-    --chart-1: #91c5ff;
-    --chart-2: #3a81f6;
-    --chart-3: #2563ef;
-    --chart-4: #1a4eda;
-    --chart-5: #1f3fad;
-    --sidebar: #fafafa;
-    --sidebar-foreground: #0a0a0a;
-    --sidebar-primary: #171717;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #27272a;
+    --muted: #f4f4f5;
+    --muted-foreground: #71717a;
+    --accent: #eeeeef;
+    --accent-foreground: #18181b;
+    --destructive: #b91c1c;
+    --destructive-foreground: #fffafa;
+    --warning: #8a5b12;
+    --warning-foreground: #fffdf5;
+    --success: #35634b;
+    --success-foreground: #f7fffa;
+    --border: #e4e4e7;
+    --input: #d4d4d8;
+    --ring: #71717a;
+    --code-background: #f6f6f7;
+    --terminal-background: #111113;
+    --diff-addition: #edf5f0;
+    --diff-deletion: #faeeee;
+    --sidebar: #f8f8f9;
+    --sidebar-foreground: #27272a;
+    --sidebar-primary: #27272a;
     --sidebar-primary-foreground: #fafafa;
-    --sidebar-accent: #f5f5f5;
-    --sidebar-accent-foreground: #171717;
-    --sidebar-border: #e5e5e5;
-    --sidebar-ring: #a1a1a1;
-    --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --radius: 0.625rem;
-    --shadow-x: 0;
-    --shadow-y: 1px;
-    --shadow-blur: 3px;
-    --shadow-spread: 0px;
-    --shadow-opacity: 0.1;
-    --shadow-color: oklch(0 0 0);
-    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
-    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
-    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
-    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
-    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
-    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
-    --tracking-normal: 0em;
-    --spacing: 0.25rem;
+    --sidebar-accent: #eaeaeb;
+    --sidebar-accent-foreground: #18181b;
+    --sidebar-border: #e1e1e3;
+    --sidebar-ring: #71717a;
+    --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --radius: 0.5rem;
   }
 
   .dark {
-    --background: #0a0a0a;
-    --foreground: #fafafa;
-    --card: #171717;
-    --card-foreground: #fafafa;
-    --popover: #262626;
-    --popover-foreground: #fafafa;
-    --primary: #e5e5e5;
-    --primary-foreground: #171717;
-    --secondary: #262626;
-    --secondary-foreground: #fafafa;
-    --muted: #262626;
-    --muted-foreground: #a1a1a1;
-    --accent: #404040;
-    --accent-foreground: #fafafa;
-    --destructive: #ff6467;
-    --destructive-foreground: #fafafa;
-    --border: #282828;
-    --input: #343434;
-    --ring: #737373;
-    --chart-1: #91c5ff;
-    --chart-2: #3a81f6;
-    --chart-3: #2563ef;
-    --chart-4: #1a4eda;
-    --chart-5: #1f3fad;
-    --sidebar: #171717;
-    --sidebar-foreground: #fafafa;
-    --sidebar-primary: #1447e6;
-    --sidebar-primary-foreground: #fafafa;
-    --sidebar-accent: #262626;
+    color-scheme: dark;
+    --background: #111112;
+    --foreground: #eeeeef;
+    --card: #151516;
+    --card-foreground: #eeeeef;
+    --popover: #1b1b1d;
+    --popover-foreground: #f4f4f5;
+    --primary: #eeeeef;
+    --primary-foreground: #171718;
+    --secondary: #222225;
+    --secondary-foreground: #eeeeef;
+    --muted: #212123;
+    --muted-foreground: #9b9ba3;
+    --accent: #29292c;
+    --accent-foreground: #f4f4f5;
+    --destructive: #c95f5f;
+    --destructive-foreground: #fffafa;
+    --warning: #b48a4d;
+    --warning-foreground: #17120a;
+    --success: #6e9b81;
+    --success-foreground: #0b160f;
+    --border: #2b2b2e;
+    --input: #37373b;
+    --ring: #888890;
+    --code-background: #171719;
+    --terminal-background: #0c0c0e;
+    --diff-addition: #17231c;
+    --diff-deletion: #28191a;
+    --sidebar: #151516;
+    --sidebar-foreground: #e4e4e7;
+    --sidebar-primary: #e4e4e7;
+    --sidebar-primary-foreground: #18181b;
+    --sidebar-accent: #252527;
     --sidebar-accent-foreground: #fafafa;
-    --sidebar-border: #282828;
-    --sidebar-ring: #525252;
-    --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --radius: 0.625rem;
-    --shadow-x: 0;
-    --shadow-y: 1px;
-    --shadow-blur: 3px;
-    --shadow-spread: 0px;
-    --shadow-opacity: 0.1;
-    --shadow-color: oklch(0 0 0);
-    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
-    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 1px 2px -1px hsl(0 0% 0% / 0.10);
-    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 2px 4px -1px hsl(0 0% 0% / 0.10);
-    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 4px 6px -1px hsl(0 0% 0% / 0.10);
-    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.10), 0 8px 10px -1px hsl(0 0% 0% / 0.10);
-    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+    --sidebar-border: #29292c;
+    --sidebar-ring: #888890;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
 
+  html,
+  body,
+  #root {
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background font-sans text-foreground antialiased;
+    font-size: 14px;
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  textarea,
+  [role="button"] {
+    -webkit-app-region: no-drag;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--foreground) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  * {
+    scrollbar-color: var(--input) transparent;
+    scrollbar-width: thin;
   }
 }
 
-.markdown {
-  @apply text-sm leading-7;
+@layer components {
+  .markdown {
+    @apply break-words text-[13px] leading-6 text-foreground;
+  }
+
+  .markdown > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown > :last-child {
+    margin-bottom: 0;
+  }
+
+  .markdown p,
+  .markdown ul,
+  .markdown ol,
+  .markdown blockquote,
+  .markdown table {
+    @apply my-3;
+  }
+
+  .markdown ul {
+    @apply list-disc pl-5;
+  }
+
+  .markdown ol {
+    @apply list-decimal pl-5;
+  }
+
+  .markdown li {
+    @apply my-1;
+  }
+
+  .markdown h1 {
+    @apply mb-3 mt-6 text-lg font-semibold tracking-tight;
+  }
+
+  .markdown h2 {
+    @apply mb-2 mt-5 text-base font-semibold tracking-tight;
+  }
+
+  .markdown h3 {
+    @apply mb-2 mt-4 text-sm font-semibold;
+  }
+
+  .markdown a {
+    @apply underline decoration-muted-foreground underline-offset-4 hover:text-muted-foreground;
+  }
+
+  .markdown blockquote {
+    @apply border-l-2 pl-4 text-muted-foreground;
+  }
+
+  .markdown table {
+    @apply block max-w-full overflow-x-auto border-collapse text-xs;
+  }
+
+  .markdown th,
+  .markdown td {
+    @apply border px-3 py-2 text-left;
+  }
+
+  .markdown code:not(pre code) {
+    @apply rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[0.9em];
+  }
+
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal {
+    color: #b8a6d9;
+  }
+
+  .hljs-string,
+  .hljs-attr,
+  .hljs-template-variable {
+    color: #9db99f;
+  }
+
+  .hljs-number,
+  .hljs-symbol,
+  .hljs-bullet {
+    color: #c4a77d;
+  }
+
+  .hljs-comment,
+  .hljs-quote {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+
+  .diff-add {
+    background: var(--diff-addition);
+  }
+
+  .diff-remove {
+    background: var(--diff-deletion);
+  }
+
+  .content-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 160px;
+  }
 }
 
-.markdown p {
-  @apply my-2;
-}
-
-.markdown ul {
-  @apply my-2 list-disc pl-5;
-}
-
-.markdown ol {
-  @apply my-2 list-decimal pl-5;
-}
-
-.markdown pre {
-  @apply my-3 overflow-auto rounded-md border bg-black/35 p-3 text-xs;
-}
-
-.markdown code:not(pre code) {
-  @apply rounded bg-muted px-1.5 py-0.5 text-xs;
-}
-
-.markdown h1 {
-  @apply mb-3 mt-5 text-xl font-semibold;
-}
-
-.markdown h2 {
-  @apply mb-2 mt-4 text-lg font-semibold;
-}
-
-.markdown a {
-  @apply text-emerald-400 underline;
-}
-
-.diff-add {
-  @apply bg-emerald-500/10 text-emerald-300;
-}
-
-.diff-remove {
-  @apply bg-red-500/10 text-red-300;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

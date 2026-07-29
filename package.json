@@ -4,7 +4,7 @@
   "packageManager": "bun@1.3.14",
   "scripts": {
     "desktop:dev": "bun run --cwd crates/kernex-desktop tauri dev",
-    "desktop:build": "bun run --cwd crates/kernex-desktop tauri build",
+    "desktop:build": "bun run scripts/build-desktop.ts",
     "frontend:build": "bun run --cwd crates/kernex-desktop build",
     "frontend:typecheck": "bun run --cwd crates/kernex-desktop typecheck",
     "frontend:lint": "bun run --cwd crates/kernex-desktop lint",

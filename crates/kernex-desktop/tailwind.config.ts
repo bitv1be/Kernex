@@ -23,6 +23,20 @@ export default {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
         },
+        warning: {
+          DEFAULT: "var(--warning)",
+          foreground: "var(--warning-foreground)",
+        },
+        success: {
+          DEFAULT: "var(--success)",
+          foreground: "var(--success-foreground)",
+        },
+        code: "var(--code-background)",
+        terminal: "var(--terminal-background)",
+        diff: {
+          addition: "var(--diff-addition)",
+          deletion: "var(--diff-deletion)",
+        },
         muted: {
           DEFAULT: "var(--muted)",
           foreground: "var(--muted-foreground)",
