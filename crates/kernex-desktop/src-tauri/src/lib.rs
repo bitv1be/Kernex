@@ -5,12 +5,13 @@ use std::sync::{Arc, Condvar, Mutex};
 
 use agent_core::{
     AgentError, AgentEvent, AgentRunConfig, Approver, AuditedApprover, AuthManager, AuthStatus,
-    CommandOutput, CommandRunner, CommandSpec, EventSink, FileEditor, FileRecord, GitRepository,
-    InstructionSet, KernexConfig, KernexSettings, ModelProvider, OAuthConfig, PermissionDecision,
-    PermissionGate, PermissionMode, PermissionPolicy, PermissionRequest, ProjectGrantStore,
-    ProjectIndex, ProviderConfig, ProviderKind, ProviderModel, RuntimeError, SecretValue,
-    SessionRecord, SessionRecorder, SessionStatus, SessionStore, Workspace, prepare_http_provider,
-    run_agent_turn,
+    CodexAccountStatus, CodexRateLimits, CommandOutput, CommandRunner, CommandSpec, EventSink,
+    FileEditor, FileRecord, GitRepository, InstructionSet, KernexConfig, KernexSettings,
+    ModelProvider, OAuthConfig, PermissionDecision, PermissionGate, PermissionMode,
+    PermissionPolicy, PermissionRequest, ProjectGrantStore, ProjectIndex, ProviderConfig,
+    ProviderKind, ProviderModel, RuntimeError, SecretValue, SessionRecord, SessionRecorder,
+    SessionStatus, SessionStore, Workspace, codex_account_status, codex_login_chatgpt,
+    codex_logout, codex_models, codex_rate_limits, prepare_http_provider, run_agent_turn,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -154,6 +155,7 @@ struct ProviderSummary {
     base_url: String,
     api_key_environment: Option<String>,
     oauth_pkce: bool,
+    managed_oauth: bool,
 }
 
 #[tauri::command]
@@ -192,6 +194,7 @@ async fn start_agent(
     session.provider = request.provider.to_string();
     session.model.clone_from(&request.model);
     session.status = SessionStatus::Active;
+    let provider_thread_id = session.provider_thread_id.clone();
     let history = session.messages.clone();
     let session_id = session.id.clone();
     let recorder = Arc::new(
@@ -227,6 +230,7 @@ async fn start_agent(
                 provider,
                 permission_mode: request.permission_mode,
                 max_steps: request.max_steps,
+                provider_thread_id,
             },
             request.task,
             history,
@@ -456,6 +460,9 @@ async fn discover_models(
     auth_profile: Option<String>,
 ) -> Result<Vec<ProviderModel>, String> {
     let provider = ProviderKind::from_str(&provider).map_err(error_string)?;
+    if provider == ProviderKind::Codex {
+        return codex_models().await.map_err(error_string);
+    }
     let mut config = ProviderConfig::for_kind(
         provider,
         if model.trim().is_empty() {
@@ -532,6 +539,7 @@ fn providers() -> Vec<ProviderSummary> {
                 base_url: config.base_url,
                 api_key_environment: config.api_key_env,
                 oauth_pkce: kind == ProviderKind::Gemini,
+                managed_oauth: kind == ProviderKind::Codex,
             }
         })
         .collect()
@@ -546,8 +554,31 @@ fn auth_status() -> Result<Vec<AuthStatus>, String> {
 }
 
 #[tauri::command]
+async fn codex_account() -> Result<CodexAccountStatus, String> {
+    codex_account_status(false).await.map_err(error_string)
+}
+
+#[tauri::command]
+async fn codex_login() -> Result<CodexAccountStatus, String> {
+    codex_login_chatgpt().await.map_err(error_string)
+}
+
+#[tauri::command]
+async fn codex_sign_out() -> Result<(), String> {
+    codex_logout().await.map_err(error_string)
+}
+
+#[tauri::command]
+async fn codex_limits() -> Result<CodexRateLimits, String> {
+    codex_rate_limits().await.map_err(error_string)
+}
+
+#[tauri::command]
 fn auth_login_api_key(profile: String, provider: String, api_key: String) -> Result<(), String> {
     let provider = ProviderKind::from_str(&provider).map_err(error_string)?;
+    if provider == ProviderKind::Codex {
+        return Err("Codex subscription access uses managed ChatGPT OAuth".into());
+    }
     AuthManager::open_default()
         .map_err(error_string)?
         .login_api_key(profile, provider, SecretValue::new(api_key))
@@ -562,6 +593,9 @@ fn auth_login_environment(
     variable: String,
 ) -> Result<(), String> {
     let provider = ProviderKind::from_str(&provider).map_err(error_string)?;
+    if provider == ProviderKind::Codex {
+        return Err("Codex subscription access uses managed ChatGPT OAuth".into());
+    }
     AuthManager::open_default()
         .map_err(error_string)?
         .login_environment(profile, provider, variable)
@@ -662,6 +696,10 @@ pub fn run() {
             save_project_config,
             providers,
             auth_status,
+            codex_account,
+            codex_login,
+            codex_sign_out,
+            codex_limits,
             auth_login_api_key,
             auth_login_environment,
             auth_login_oauth,
@@ -679,4 +717,21 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running the Kernex desktop application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_provider_advertises_managed_oauth_to_the_desktop() {
+        let codex = providers()
+            .into_iter()
+            .find(|provider| provider.kind == ProviderKind::Codex)
+            .expect("Codex provider summary");
+        assert!(codex.managed_oauth);
+        assert!(!codex.oauth_pkce);
+        assert!(codex.base_url.is_empty());
+        assert!(codex.api_key_environment.is_none());
+    }
 }

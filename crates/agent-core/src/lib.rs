@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod auth;
+pub mod codex_app_server;
 pub mod command;
 pub mod config;
 pub mod diff;
@@ -35,6 +36,13 @@ pub use agent::{
 pub use auth::{
     AuthManager, AuthMethod, AuthProfile, AuthStatus, CredentialVault, KeyringVault, OAuthConfig,
     SecretValue,
+};
+pub use codex_app_server::{
+    CodexAccount, CodexAccountStatus, CodexAppServerClient, CodexAppServerConfig,
+    CodexAppServerError, CodexCredits, CodexLoginStart, CodexRateLimitResetCredits,
+    CodexRateLimitSnapshot, CodexRateLimitWindow, CodexRateLimits, CodexTurnConfig,
+    codex_account_status, codex_login_chatgpt, codex_logout, codex_models, codex_rate_limits,
+    run_codex_turn, run_codex_turn_with_server,
 };
 pub use command::{CommandOutput, CommandRunner, CommandSpec};
 pub use config::{KernexConfig, LanguageServerEntry};

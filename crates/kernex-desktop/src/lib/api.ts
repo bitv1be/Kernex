@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AuthStatus, CommandOutput, ProviderModel, ProviderSummary, SessionRecord, Settings, StartAgentRequest, WorkspaceOverview } from "./types";
+import type { AuthStatus, CodexAccountStatus, CodexRateLimits, CommandOutput, ProviderModel, ProviderSummary, SessionRecord, Settings, StartAgentRequest, WorkspaceOverview } from "./types";
 
 export const api = {
   overview: (path: string) => invoke<WorkspaceOverview>("workspace_overview", { path }),
@@ -20,6 +20,10 @@ export const api = {
   projectConfig: (workspace: string) => invoke<string>("project_config", { workspace }),
   saveProjectConfig: (workspace: string, contents: string) => invoke<string>("save_project_config", { workspace, contents }),
   authStatus: () => invoke<AuthStatus[]>("auth_status"),
+  codexAccount: () => invoke<CodexAccountStatus>("codex_account"),
+  codexLogin: () => invoke<CodexAccountStatus>("codex_login"),
+  codexLogout: () => invoke<void>("codex_sign_out"),
+  codexRateLimits: () => invoke<CodexRateLimits>("codex_limits"),
   loginApiKey: (profile: string, provider: string, apiKey: string) => invoke<void>("auth_login_api_key", { profile, provider, apiKey }),
   loginEnvironment: (profile: string, provider: string, variable: string) => invoke<void>("auth_login_environment", { profile, provider, variable }),
   loginOAuth: (profile: string, provider: string, clientId: string, resourceProject?: string) => invoke<void>("auth_login_oauth", { profile, provider, clientId, authorizationUrl: null, tokenUrl: null, scopes: [], resourceProject }),

@@ -2,18 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kernex",
   "version": "0.1.0",
-  "identifier": "dev.kernex.desktop",
+  "identifier": "com.bitvibe.kernex.desktop",
   "build": {
-    "beforeDevCommand": {
-      "cwd": "ui",
-      "script": "npm run dev"
-    },
-    "beforeBuildCommand": {
-      "cwd": "ui",
-      "script": "npm run build"
-    },
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "frontendDist": "ui/dist"
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [

@@ -11,10 +11,20 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          editor: ["@uiw/react-codemirror"],
-          terminal: ["@xterm/xterm", "@xterm/addon-fit"],
-          markdown: ["react-markdown", "remark-gfm", "rehype-highlight"],
+        manualChunks(id) {
+          if (id.includes("@uiw/react-codemirror") || id.includes("@codemirror/")) {
+            return "editor";
+          }
+          if (id.includes("@xterm/")) {
+            return "terminal";
+          }
+          if (
+            id.includes("react-markdown") ||
+            id.includes("remark-") ||
+            id.includes("rehype-")
+          ) {
+            return "markdown";
+          }
         },
       },
     },

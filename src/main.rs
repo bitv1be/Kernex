@@ -11,7 +11,8 @@ use agent_core::{
     PermissionPolicy, PermissionRequest, PluginRegistry, ProjectIndex, ProviderConfig,
     ProviderKind, ProviderStreamEvent, Role, RuntimeError, SecretValue, SessionRecord,
     SessionRecorder, SessionStatus, SessionStore, SyntaxAnalyzer, VERSION, Workspace,
-    prepare_http_provider, run_agent_turn,
+    codex_account_status, codex_login_chatgpt, codex_logout, codex_models, prepare_http_provider,
+    run_agent_turn,
 };
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -140,7 +141,7 @@ enum Commands {
 
 #[derive(Debug, Subcommand)]
 enum AuthCommands {
-    /// Sign in with an API key, environment variable, or official OAuth PKCE flow.
+    /// Sign in with an API key, environment variable, or an official managed OAuth flow.
     Login(AuthLoginArgs),
     /// Delete a profile and its credentials from native secure storage.
     Logout { profile: Option<String> },
@@ -640,6 +641,7 @@ async fn run_one_task(
     session.provider = provider.kind.to_string();
     session.model.clone_from(&provider.model);
     session.status = SessionStatus::Active;
+    let provider_thread_id = session.provider_thread_id.clone();
     let history = session.messages.clone();
     let recorder = Arc::new(SessionRecorder::new(
         store,
@@ -663,6 +665,7 @@ async fn run_one_task(
             provider,
             permission_mode,
             max_steps,
+            provider_thread_id,
         },
         task,
         history,
@@ -743,6 +746,33 @@ async fn handle_auth(command: AuthCommands, settings: &mut KernexSettings) -> Re
     match command {
         AuthCommands::Login(args) => {
             let provider = choose_provider(args.provider.as_deref())?;
+            if provider == ProviderKind::Codex {
+                if args
+                    .method
+                    .is_some_and(|method| !matches!(method, AuthMethodArg::OAuth))
+                {
+                    bail!(
+                        "Codex subscription access uses managed ChatGPT OAuth; pass --method oauth"
+                    );
+                }
+                let account = codex_login_chatgpt().await?;
+                settings.provider.name = ProviderKind::Codex;
+                settings.provider.auth_profile = None;
+                settings.save_default()?;
+                let account = account
+                    .account
+                    .context("ChatGPT sign-in completed without an account")?;
+                println!(
+                    "Signed in to ChatGPT as {}{}.",
+                    account.email.as_deref().unwrap_or("the current account"),
+                    account
+                        .plan_type
+                        .as_deref()
+                        .map(|plan| format!(" ({plan})"))
+                        .unwrap_or_default()
+                );
+                return Ok(());
+            }
             let method = choose_auth_method(args.method)?;
             let profile = match method {
                 AuthMethodArg::ApiKey => {
@@ -817,6 +847,13 @@ async fn handle_auth(command: AuthCommands, settings: &mut KernexSettings) -> Re
             println!("Signed in with profile `{}` for {provider}.", profile.name);
         }
         AuthCommands::Logout { profile } => {
+            if settings.provider.name == ProviderKind::Codex && profile.is_none() {
+                codex_logout().await?;
+                settings.provider.auth_profile = None;
+                settings.save_default()?;
+                println!("Signed out of the Codex ChatGPT account.");
+                return Ok(());
+            }
             let profile = select_profile(&manager, profile)?;
             manager.logout(&profile)?;
             if settings.provider.auth_profile.as_deref() == Some(&profile) {
@@ -827,11 +864,31 @@ async fn handle_auth(command: AuthCommands, settings: &mut KernexSettings) -> Re
         }
         AuthCommands::Status { json } => {
             let statuses = manager.statuses()?;
+            let codex = codex_account_status(false).await;
             if json {
-                println!("{}", serde_json::to_string_pretty(&statuses)?);
-            } else if statuses.is_empty() {
-                println!("No authentication profiles configured.");
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "profiles": statuses,
+                        "codex": codex.as_ref().ok(),
+                        "codex_error": codex.as_ref().err().map(ToString::to_string),
+                    }))?
+                );
             } else {
+                match codex {
+                    Ok(status) => match status.account {
+                        Some(account) => println!(
+                            "Codex ChatGPT\t{}\t{}",
+                            account.email.as_deref().unwrap_or("signed in"),
+                            account.plan_type.as_deref().unwrap_or("plan unavailable")
+                        ),
+                        None => println!("Codex ChatGPT\tnot signed in"),
+                    },
+                    Err(error) => println!("Codex ChatGPT\tunavailable: {error}"),
+                }
+                if statuses.is_empty() {
+                    println!("No key, environment, or PKCE authentication profiles configured.");
+                }
                 for status in statuses {
                     println!(
                         "{}{}\t{}\t{:?}\t{}",
@@ -1004,6 +1061,9 @@ async fn ask_model(
     config: ProviderConfig,
     prompt: String,
 ) -> Result<()> {
+    if config.kind == ProviderKind::Codex {
+        bail!("Codex App Server is an agent runtime; use `kernex run` instead of `kernex ask`");
+    }
     let provider = prepare_http_provider(config, permissions).await?;
     let response = provider
         .complete(CompletionRequest::new(vec![
@@ -1089,16 +1149,20 @@ async fn list_models_and_providers(
         .map(|kind| ProviderConfig::for_kind(kind, ""))
         .collect();
     let models = if discover {
-        let mut config = settings.provider.to_provider_config();
-        if config.model.trim().is_empty() {
-            config.model = "model-catalog".into();
+        if settings.provider.name == ProviderKind::Codex {
+            Some(codex_models().await?)
+        } else {
+            let mut config = settings.provider.to_provider_config();
+            if config.model.trim().is_empty() {
+                config.model = "model-catalog".into();
+            }
+            Some(
+                prepare_http_provider(config, basic_permissions(assume_yes))
+                    .await?
+                    .models()
+                    .await?,
+            )
         }
-        Some(
-            prepare_http_provider(config, basic_permissions(assume_yes))
-                .await?
-                .models()
-                .await?,
-        )
     } else {
         None
     };
@@ -1127,12 +1191,18 @@ async fn list_models_and_providers(
             println!(
                 "{:<20} {:<48} {}",
                 config.kind,
-                if config.base_url.is_empty() {
+                if config.kind == ProviderKind::Codex {
+                    "<Codex App Server>"
+                } else if config.base_url.is_empty() {
                     "<required>"
                 } else {
                     &config.base_url
                 },
-                config.api_key_env.as_deref().unwrap_or("<none>")
+                if config.kind == ProviderKind::Codex {
+                    "ChatGPT OAuth"
+                } else {
+                    config.api_key_env.as_deref().unwrap_or("<none>")
+                }
             );
         }
         if let Some(models) = models {

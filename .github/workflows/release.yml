@@ -99,20 +99,17 @@ jobs:
             bundles: appimage
             rust_target: x86_64-unknown-linux-gnu
             bundle_dir: target/x86_64-unknown-linux-gnu/release/bundle
-            tauri_script: ../../node_modules/.bin/tauri
           - os: windows-latest
             platform: windows-x86_64
             bundles: nsis,msi
             rust_target: x86_64-pc-windows-msvc
             bundle_dir: target/x86_64-pc-windows-msvc/release/bundle
-            tauri_script: ../../node_modules/.bin/tauri.cmd
           - os: macos-latest
             platform: macos-universal
             bundles: app,dmg
             rust_target: universal-apple-darwin
             bundle_dir: target/universal-apple-darwin/release/bundle
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-            tauri_script: ../../node_modules/.bin/tauri
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     permissions:
@@ -124,10 +121,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.target }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -151,18 +145,19 @@ jobs:
         with:
           workspaces: ". -> target"
       - name: Install frontend dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
+        working-directory: crates/kernex-desktop
       - name: Create release version overlay
         run: >-
-          node -e "require('node:fs').writeFileSync('crates/kernex-desktop/tauri.release.json',
-          JSON.stringify({ version: process.env.KERNEX_RELEASE_VERSION }))"
+          bun -e "await Bun.write('crates/kernex-desktop/tauri.release.json',
+          JSON.stringify({ version: Bun.env.KERNEX_RELEASE_VERSION }))"
       - name: Build production installers
         uses: tauri-apps/tauri-action@v1
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         with:
           projectPath: crates/kernex-desktop
-          tauriScript: ${{ matrix.tauri_script }}
+          tauriScript: bun tauri
           args: >-
             --config ./tauri.release.json
             --target ${{ matrix.rust_target }}

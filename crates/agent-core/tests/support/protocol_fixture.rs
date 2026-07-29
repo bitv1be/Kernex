@@ -7,6 +7,7 @@ fn main() {
         Some("mcp") => serve_mcp(),
         Some("lsp") => serve_lsp(),
         Some("plugin") => serve_plugin(),
+        Some("codex") => serve_codex(),
         _ => std::process::exit(2),
     }
 }
@@ -109,6 +110,157 @@ fn serve_plugin() {
     io::stdin().read_to_string(&mut input).unwrap();
     let value: Value = serde_json::from_str(input.trim()).unwrap();
     println!("{}", json!({"received": value}));
+}
+
+fn serve_codex() {
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines();
+    let mut stdout = io::stdout().lock();
+    while let Some(Ok(line)) = lines.next() {
+        let Ok(message) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+        if method == "initialized" {
+            continue;
+        }
+        let Some(id) = message.get("id").cloned() else {
+            continue;
+        };
+        let result = match method {
+            "initialize" => json!({"userAgent": "kernex-fixture"}),
+            "account/read" => json!({
+                "account": {"type": "chatgpt", "email": "fixture@example.com", "planType": "plus"},
+                "requiresOpenaiAuth": true
+            }),
+            "account/rateLimits/read" => json!({
+                "rateLimits": {
+                    "limitId": "codex",
+                    "planType": "plus",
+                    "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": 1800000000}
+                },
+                "rateLimitsByLimitId": {},
+                "rateLimitResetCredits": {"availableCount": 2}
+            }),
+            "model/list" => json!({
+                "data": [{
+                    "id": "gpt-fixture",
+                    "displayName": "GPT Fixture",
+                    "description": "Subscription fixture model",
+                    "isDefault": true
+                }],
+                "nextCursor": null
+            }),
+            "account/login/start" => {
+                write_json_line(
+                    &mut stdout,
+                    &json!({"id": id, "result": {
+                        "type": "chatgpt",
+                        "loginId": "login-fixture",
+                        "authUrl": "https://example.com/login"
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "account/login/completed", "params": {
+                        "loginId": "login-fixture", "success": true, "error": null
+                    }}),
+                );
+                continue;
+            }
+            "account/logout" => json!({}),
+            "thread/start" | "thread/resume" => json!({
+                "thread": {"id": "thread-fixture", "sessionId": "thread-fixture"},
+                "model": "gpt-fixture",
+                "modelProvider": "openai",
+                "cwd": "/workspace",
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": {"type": "workspaceWrite"}
+            }),
+            "turn/start" => {
+                write_json_line(
+                    &mut stdout,
+                    &json!({"id": id, "result": {"turn": {
+                        "id": "turn-fixture", "status": "inProgress", "items": []
+                    }}}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "item/started", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture", "item": {
+                            "id": "command-fixture", "type": "commandExecution", "command": "cargo test",
+                            "commandActions": [], "cwd": "/workspace", "status": "inProgress"
+                        }
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"id": 900, "method": "item/commandExecution/requestApproval", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture",
+                        "itemId": "command-fixture", "command": "cargo test", "cwd": "/workspace",
+                        "reason": "run fixture tests", "startedAtMs": 1
+                    }}),
+                );
+                let approval = lines
+                    .next()
+                    .and_then(Result::ok)
+                    .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+                    .expect("fixture approval response");
+                assert_eq!(approval["id"], 900);
+                assert_eq!(approval["result"]["decision"], "acceptForSession");
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "item/completed", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture", "completedAtMs": 2,
+                        "item": {"id": "command-fixture", "type": "commandExecution", "command": "cargo test",
+                            "commandActions": [], "cwd": "/workspace", "status": "completed",
+                            "aggregatedOutput": "tests passed", "exitCode": 0}
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "item/agentMessage/delta", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture",
+                        "itemId": "message-fixture", "delta": "Fixture complete"
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "item/completed", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture", "completedAtMs": 3,
+                        "item": {"id": "message-fixture", "type": "agentMessage",
+                            "phase": "final_answer", "text": "Fixture complete"}
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "thread/tokenUsage/updated", "params": {
+                        "threadId": "thread-fixture", "turnId": "turn-fixture",
+                        "tokenUsage": {"last": {"inputTokens": 7, "outputTokens": 3}, "total": {}}
+                    }}),
+                );
+                write_json_line(
+                    &mut stdout,
+                    &json!({"method": "turn/completed", "params": {
+                        "threadId": "thread-fixture", "turn": {
+                            "id": "turn-fixture", "status": "completed", "items": []
+                        }
+                    }}),
+                );
+                continue;
+            }
+            "turn/interrupt" => json!({}),
+            _ => {
+                write_json_line(
+                    &mut stdout,
+                    &json!({"id": id, "error": {"code": -32601, "message": "unknown fixture method"}}),
+                );
+                continue;
+            }
+        };
+        write_json_line(&mut stdout, &json!({"id": id, "result": result}));
+    }
 }
 
 fn write_json_line(writer: &mut impl Write, value: &Value) {

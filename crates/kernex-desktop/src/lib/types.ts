@@ -1,4 +1,4 @@
-export type ProviderKind = "openai-compatible" | "anthropic" | "gemini" | "local" | "custom";
+export type ProviderKind = "codex" | "openai-compatible" | "anthropic" | "gemini" | "local" | "custom";
 export type PermissionMode = "read-only" | "ask" | "auto-safe" | "full-access";
 export type SessionStatus = "active" | "completed" | "cancelled" | "failed";
 
@@ -18,6 +18,7 @@ export interface SessionRecord {
   workspace_path: string;
   provider: string;
   model: string;
+  provider_thread_id?: string;
   messages: Message[];
   tool_calls: ToolCall[];
   tool_results: ToolResult[];
@@ -54,11 +55,14 @@ export interface ProviderSummary {
   base_url: string;
   api_key_environment?: string;
   oauth_pkce: boolean;
+  managed_oauth: boolean;
 }
 
 export interface ProviderModel {
   id: string;
   display_name?: string;
+  description?: string;
+  is_default: boolean;
   owned_by?: string;
   input_token_limit?: number;
   output_token_limit?: number;
@@ -82,6 +86,26 @@ export interface AuthProfile {
   oauth_resource_project?: string;
 }
 export interface AuthStatus { profile: AuthProfile; active: boolean; credential_available: boolean; expired: boolean }
+
+export interface CodexAccountStatus {
+  account?: { type: string; email?: string; planType?: string } | null;
+  requiresOpenaiAuth: boolean;
+}
+
+export interface CodexRateLimitWindow { usedPercent: number; windowDurationMins?: number; resetsAt?: number }
+export interface CodexRateLimitSnapshot {
+  limitId?: string;
+  limitName?: string;
+  planType?: string;
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow;
+  credits?: { hasCredits: boolean; unlimited: boolean; balance?: string };
+}
+export interface CodexRateLimits {
+  rateLimits?: CodexRateLimitSnapshot;
+  rateLimitsByLimitId?: Record<string, CodexRateLimitSnapshot>;
+  rateLimitResetCredits?: { availableCount: number };
+}
 
 export interface StartAgentRequest {
   workspace: string;

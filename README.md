@@ -7,7 +7,8 @@ The project evolved from its original Rust CLI and eframe desktop foundation. Ex
 ## Prerequisites
 
 - stable Rust with Cargo;
-- Node.js 20 or newer and npm;
+- Bun 1.3 or newer;
+- the Codex CLI on `PATH` when using ChatGPT subscription access;
 - the [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/) for desktop development;
 - a native credential service (Windows Credential Manager, macOS Keychain, or Linux Secret Service) for stored credentials.
 
@@ -21,7 +22,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librs
 Install the frontend dependencies once:
 
 ```bash
-npm ci
+bun install --cwd crates/kernex-desktop --frozen-lockfile
 ```
 
 ## CLI
@@ -52,12 +53,12 @@ cargo run -p kernex-cli -- models
 Start the Vite frontend and native Tauri host together:
 
 ```bash
-npm run desktop:dev
+bun run desktop:dev
 ```
 
 Create a production application bundle with:
 
-    npm run desktop:build
+    bun run desktop:build
 
 The desktop interface includes recent-project selection, shared session history, streaming chat, file and code views, Git status/diffs/log, a permissioned terminal, tool activity, approval dialogs, provider and model settings, authentication profiles, project MCP/LSP visibility, diagnostics, and light/dark themes.
 
@@ -70,18 +71,23 @@ Merges to `main` automatically build, install, smoke test, and publish native de
 - Kernex-VERSION-macos-universal.dmg and a complete Kernex-VERSION-macos-universal.app.tar.gz application bundle;
 - SHA256SUMS for every downloadable package.
 
-The Windows installers include the offline WebView2 installer. Published packages contain the production frontend and do not require Node.js, Rust, a development server, the source tree, or project dependency directories at runtime.
+The Windows installers include the offline WebView2 installer. Published packages contain the production frontend and do not require Bun, Node.js, Rust, a development server, the source tree, or project dependency directories at runtime.
 
 ## Authentication and providers
 
-Supported adapters are `openai-compatible`, `anthropic`, `gemini`, `local`, and `custom`. API keys can come from a native keyring profile or a named environment variable. OAuth Authorization Code with PKCE is implemented for Google Gemini (using a desktop client ID and Cloud project ID) and for user-configured custom providers only when their official documentation supports a public-client flow; OpenAI and Anthropic continue to use their supported API credentials.
+Supported adapters are `codex`, `openai-compatible`, `anthropic`, `gemini`, `local`, and `custom`. The `codex` adapter delegates complete turns to the installed [Codex App Server](https://learn.chatgpt.com/docs/app-server), uses its managed ChatGPT OAuth session, discovers the models available to the current subscription plan, reports plan rate limits, and persists the App Server thread ID with the shared Kernex session. Other adapters use API keys from a native keyring profile or named environment variable; Google Gemini and documented custom providers can use Kernex's PKCE client.
 
 ```bash
+cargo run -p kernex-cli -- auth login --provider codex --method o-auth
+cargo run -p kernex-cli -- models --discover
+cargo run -p kernex-cli -- run --provider codex --model MODEL "Fix the failing tests"
 cargo run -p kernex-cli -- auth login
 cargo run -p kernex-cli -- auth status
 cargo run -p kernex-cli -- auth use personal
 cargo run -p kernex-cli -- auth logout personal
 ```
+
+The Codex executable defaults to `codex`; set `KERNEX_CODEX_PATH` to an explicit executable path when it is installed elsewhere. Codex owns token persistence and refresh. Kernex exchanges newline-delimited JSON-RPC over stdio, never reads or serializes the ChatGPT tokens, and forwards Codex command, file-change, and additional-sandbox approvals through the normal Kernex approval surface.
 
 See [Authentication](docs/AUTHENTICATION.md) for profile storage, OAuth setup, custom endpoints, refresh behavior, and platform notes.
 
@@ -122,10 +128,10 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --locked
 cargo build --workspace --locked
-npm run frontend:typecheck
-npm run frontend:lint
-npm run frontend:test
-npm run frontend:build
+bun run frontend:typecheck
+bun run frontend:lint
+bun run frontend:test
+bun run frontend:build
 ```
 
 See [Architecture](docs/ARCHITECTURE.md) and [Security](docs/SECURITY.md) for implementation and trust-boundary details.

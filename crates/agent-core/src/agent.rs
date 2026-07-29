@@ -728,11 +728,12 @@ impl Toolbox {
                 }
             }
         } else if root.join("package.json").is_file() {
+            let package_manager = JavaScriptPackageManager::detect(root);
             match operation {
-                "run_tests" => ("npm", vec!["test".into(), "--".into(), "--run".into()]),
-                "run_build" => ("npm", vec!["run".into(), "build".into()]),
-                "run_formatter" => ("npm", vec!["run".into(), "format".into()]),
-                "run_linter" => ("npm", vec!["run".into(), "lint".into()]),
+                "run_tests" => package_manager.script("test", true),
+                "run_build" => package_manager.script("build", false),
+                "run_formatter" => package_manager.script("format", false),
+                "run_linter" => package_manager.script("lint", false),
                 _ => {
                     return Err(ToolError::NoProjectCommand {
                         operation: operation.into(),
@@ -746,6 +747,44 @@ impl Toolbox {
         };
         args.extend(additional_args);
         Ok(CommandSpec::new(program, args))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JavaScriptPackageManager {
+    Bun,
+    Pnpm,
+    Yarn,
+    Npm,
+}
+
+impl JavaScriptPackageManager {
+    fn detect(root: &std::path::Path) -> Self {
+        if root.join("bun.lock").is_file() || root.join("bun.lockb").is_file() {
+            Self::Bun
+        } else if root.join("pnpm-lock.yaml").is_file() {
+            Self::Pnpm
+        } else if root.join("yarn.lock").is_file() {
+            Self::Yarn
+        } else {
+            Self::Npm
+        }
+    }
+
+    fn script(self, name: &str, non_interactive_test: bool) -> (&'static str, Vec<String>) {
+        let (program, mut args) = match self {
+            Self::Bun => ("bun", vec!["run".into(), name.into()]),
+            Self::Pnpm => ("pnpm", vec!["run".into(), name.into()]),
+            Self::Yarn => ("yarn", vec![name.into()]),
+            Self::Npm => ("npm", vec!["run".into(), name.into()]),
+        };
+        if non_interactive_test {
+            if self == Self::Npm {
+                args.push("--".into());
+            }
+            args.push("--run".into());
+        }
+        (program, args)
     }
 }
 
@@ -899,6 +938,8 @@ pub struct AgentRunResult {
     pub steps: usize,
     pub messages: Vec<Message>,
     pub token_usage: TokenUsage,
+    /// Provider-owned conversation identifier used to resume external runtimes.
+    pub provider_thread_id: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -1026,6 +1067,7 @@ impl AgentEngine {
                     steps: step,
                     messages,
                     token_usage,
+                    provider_thread_id: None,
                 });
             }
 
@@ -1128,6 +1170,7 @@ fn observable_tool_call(call: &ToolCall) -> ToolCall {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::fs;
     use std::sync::Mutex;
 
     use crate::permission::{PermissionGate, PermissionPolicy};
@@ -1273,5 +1316,27 @@ mod tests {
         assert_eq!(observable.arguments["path"], "note.txt");
         assert_eq!(observable.arguments["content_bytes"], 12);
         assert!(!observable.arguments.to_string().contains("private body"));
+    }
+
+    #[test]
+    fn project_commands_use_bun_when_a_bun_lockfile_exists() {
+        let root =
+            std::env::temp_dir().join(format!("kernex-bun-project-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"scripts":{"build":"vite build"}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("bun.lock"), "").unwrap();
+        let workspace = Arc::new(Workspace::open(&root).unwrap());
+        let permissions = Arc::new(PermissionGate::new(PermissionPolicy::default(), None));
+        let toolbox = Toolbox::new(workspace, permissions).unwrap();
+
+        let command = toolbox.project_command("run_build", Vec::new()).unwrap();
+
+        assert_eq!(command.program, "bun");
+        assert_eq!(command.args, ["run", "build"]);
+        fs::remove_dir_all(root).unwrap();
     }
 }

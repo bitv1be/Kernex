@@ -3,7 +3,7 @@
 Kernex is a Rust 2024 workspace with two presentation layers and one shared business-logic crate:
 
 - `kernex-cli` at the repository root owns terminal parsing, rendering, prompts, and Ctrl+C handling.
-- `kernex-desktop` is a Tauri 2 native host. Its React/TypeScript frontend lives in `crates/kernex-desktop/ui` and communicates with Rust through typed commands and events.
+- `kernex-desktop` is a Tauri 2 native host. Its Rust backend lives in `crates/kernex-desktop/src-tauri`, while the React/TypeScript frontend lives in `crates/kernex-desktop/src` and communicates with Rust through typed commands and events.
 - `kernex-agent-core` owns agent execution, provider protocols, authentication, SQLite sessions, global/project settings, project context, tools, permissions, filesystem access, commands, Git, MCP, LSP, and plugins.
 
 Neither host implements a second agent loop. Both assemble a run through `runtime::run_agent_turn`, provide an `Approver` and `EventSink`, and use the same session/authentication stores.
@@ -11,9 +11,9 @@ Neither host implements a second agent loop. Both assemble a run through `runtim
 ## Agent flow
 
 1. The host canonicalizes the selected workspace and loads global plus `.kernex/config.toml` settings.
-2. The core discovers scoped repository instructions and configured extensions.
-3. The authentication layer resolves only the selected credential profile; the provider receives a short-lived secret wrapper rather than persisted secret text.
-4. A provider-neutral request is translated to OpenAI-compatible, Anthropic, or Gemini wire formats and consumed as a stream when supported.
+2. For HTTP providers, the core discovers scoped repository instructions and configured extensions. The authentication layer resolves only the selected credential profile; the provider receives a short-lived secret wrapper rather than persisted secret text.
+3. HTTP-provider requests are translated to OpenAI-compatible, Anthropic, or Gemini wire formats and consumed as a stream when supported.
+4. For `codex`, the shared runtime instead launches `codex app-server`, performs the required initialize handshake, starts or resumes the provider-owned thread stored in the Kernex session, and streams one complete App Server turn.
 5. Model tool calls are normalized into `ToolCall` values and dispatched only through the registered `Toolbox` definitions.
 6. The permission gate evaluates mode, risk, resource-scoped session grants, and canonical-project grants before protected work.
 7. Tool results return to the model until a final response, cancellation, or the configured step limit.
@@ -26,6 +26,7 @@ Neither host implements a second agent loop. Both assemble a run through `runtim
 - `agent.rs`: provider-independent loop and built-in registered tools.
 - `runtime.rs`: shared host assembly for a complete agent turn.
 - `provider.rs`: common model interface, wire-format adapters, SSE normalization, usage, and capabilities.
+- `codex_app_server.rs`: JSONL/JSON-RPC transport, managed ChatGPT account and plan endpoints, model discovery, persistent threads, turn events, and approval translation.
 - `auth.rs`: named profiles, PKCE OAuth, refresh/logout, secret wrappers, and native keyring access.
 - `session.rs`: shared SQLite records and permission/event auditing.
 - `permission.rs`: modes, scoped grants, project grants, and risk decisions.
@@ -39,7 +40,7 @@ The webview has no direct filesystem or process access. Tauri commands expose on
 
 ## Sessions and configuration
 
-`directories::ProjectDirs` selects platform-native user locations. `sessions.sqlite3` is the compatibility boundary between CLI and desktop. Ordinary configuration stores provider/model/base URL, an authentication-profile name, permission mode, theme, and recent projects. Project configuration stores provider overrides and extension commands. Secret values are never serialized into these files or into session records.
+`directories::ProjectDirs` selects platform-native user locations. `sessions.sqlite3` is the compatibility boundary between CLI and desktop. Ordinary configuration stores provider/model/base URL, an authentication-profile name, permission mode, theme, and recent projects. Project configuration stores provider overrides and extension commands. Secret values are never serialized into these files or into session records. A Codex-backed session stores only the opaque App Server thread ID needed by `thread/resume`; Codex owns its rollout and OAuth storage.
 
 ## Project intelligence and extensions
 
