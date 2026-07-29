@@ -66,10 +66,11 @@ The desktop interface includes recent-project selection, shared session history,
 
 Merges to `main` automatically build, install, smoke test, and publish native desktop packages for each supported platform; the current `master` default branch remains supported during migration. The same workflow also accepts pushed semantic tags such as `v0.1.0` and manual runs that name an existing semantic tag. A release is published only after all required packages are present and their downloaded copies pass the release-asset verifier:
 
-- Kernex-VERSION-linux-x86_64.AppImage;
-- Kernex-VERSION-windows-x86_64-setup.exe and Kernex-VERSION-windows-x86_64.msi;
+- Kernex-VERSION-linux-x86_64.AppImage, Kernex-VERSION-linux-x86_64.deb, Kernex-VERSION-linux-x86_64.rpm, and Kernex-VERSION-linux-x86_64.tar.gz;
+- Kernex-VERSION-windows-x86_64-setup.exe, Kernex-VERSION-windows-x86_64.msi, and Kernex-VERSION-windows-x86_64.tar.gz;
 - Kernex-VERSION-macos-universal.dmg and a complete Kernex-VERSION-macos-universal.app.tar.gz application bundle;
-- SHA256SUMS for every downloadable package.
+- SHA256SUMS for every downloadable package;
+- a keyless Sigstore `.sig` bundle for every package and the checksum manifest.
 
 The Windows installers include the offline WebView2 installer. Published packages contain the production frontend and do not require Bun, Node.js, Rust, a development server, the source tree, or project dependency directories at runtime.
 

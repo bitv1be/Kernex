@@ -16,14 +16,30 @@ fi
 
 expected=(
     "Kernex-$version-linux-x86_64.AppImage"
+    "Kernex-$version-linux-x86_64.deb"
+    "Kernex-$version-linux-x86_64.rpm"
+    "Kernex-$version-linux-x86_64.tar.gz"
     "Kernex-$version-windows-x86_64-setup.exe"
     "Kernex-$version-windows-x86_64.msi"
+    "Kernex-$version-windows-x86_64.tar.gz"
     "Kernex-$version-macos-universal.dmg"
     "Kernex-$version-macos-universal.app.tar.gz"
 )
 
 if [[ -f $dist_dir/SHA256SUMS ]]; then
     expected+=("SHA256SUMS")
+fi
+
+mapfile -t signatures < <(find "$dist_dir" -maxdepth 1 -type f -name '*.sig' -printf '%f\n')
+if (( ${#signatures[@]} > 0 )); then
+    if [[ ! -f $dist_dir/SHA256SUMS ]]; then
+        echo "Release signatures require SHA256SUMS." >&2
+        exit 1
+    fi
+    unsigned_assets=("${expected[@]}")
+    for asset in "${unsigned_assets[@]}"; do
+        expected+=("$asset.sig")
+    done
 fi
 
 mapfile -t actual < <(
@@ -50,13 +66,25 @@ hex_prefix() {
 }
 
 appimage="$dist_dir/Kernex-$version-linux-x86_64.AppImage"
+linux_deb="$dist_dir/Kernex-$version-linux-x86_64.deb"
+linux_rpm="$dist_dir/Kernex-$version-linux-x86_64.rpm"
+linux_archive="$dist_dir/Kernex-$version-linux-x86_64.tar.gz"
 windows_exe="$dist_dir/Kernex-$version-windows-x86_64-setup.exe"
 windows_msi="$dist_dir/Kernex-$version-windows-x86_64.msi"
+windows_archive="$dist_dir/Kernex-$version-windows-x86_64.tar.gz"
 macos_dmg="$dist_dir/Kernex-$version-macos-universal.dmg"
 macos_app="$dist_dir/Kernex-$version-macos-universal.app.tar.gz"
 
 [[ $(hex_prefix "$appimage" 4) == 7f454c46 ]] || {
     echo "AppImage does not have an ELF header" >&2
+    exit 1
+}
+[[ $(hex_prefix "$linux_deb" 8) == 213c617263683e0a ]] || {
+    echo "DEB package does not have an ar archive header" >&2
+    exit 1
+}
+[[ $(hex_prefix "$linux_rpm" 4) == edabeedb ]] || {
+    echo "RPM package does not have an RPM header" >&2
     exit 1
 }
 [[ $(hex_prefix "$windows_exe" 2) == 4d5a ]] || {
@@ -78,8 +106,20 @@ if [[ $dmg_magic != koly ]]; then
     exit 1
 fi
 
-app_listing=$(mktemp)
-trap 'rm -f "$app_listing"' EXIT
+archive_dir=$(mktemp -d)
+app_listing="$archive_dir/macos-app.list"
+trap 'rm -rf "$archive_dir"' EXIT
+tar -xzf "$linux_archive" -C "$archive_dir" Kernex
+[[ $(hex_prefix "$archive_dir/Kernex" 4) == 7f454c46 ]] || {
+    echo "Portable Linux archive does not contain an ELF executable" >&2
+    exit 1
+}
+rm "$archive_dir/Kernex"
+tar -xzf "$windows_archive" -C "$archive_dir" Kernex.exe
+[[ $(hex_prefix "$archive_dir/Kernex.exe" 2) == 4d5a ]] || {
+    echo "Portable Windows archive does not contain a PE executable" >&2
+    exit 1
+}
 tar -tzf "$macos_app" >"$app_listing"
 for required_path in \
     Kernex.app/Contents/Info.plist \
