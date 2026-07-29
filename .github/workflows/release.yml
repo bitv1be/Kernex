@@ -122,17 +122,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Select release commit
-        shell: bash
-        env:
-          RELEASE_TARGET: ${{ needs.prepare.outputs.target }}
-        run: |
-          set -euo pipefail
-          if [[ "${ACT:-}" != "true" ]]; then
-            git checkout --detach "$RELEASE_TARGET"
-          fi
+          ref: ${{ needs.prepare.outputs.target }}
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -142,19 +133,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${ACT:-}" == "true" ]]; then
-            sudo sed -i \
-              -e 's|http://archive.ubuntu.com/ubuntu|https://mirror.yandex.ru/ubuntu|g' \
-              -e 's|http://security.ubuntu.com/ubuntu|https://mirror.yandex.ru/ubuntu|g' \
-              /etc/apt/sources.list
-          fi
-          sudo apt-get \
-            -o Acquire::Retries=3 \
-            -o Acquire::http::Timeout=30 \
-            -o Acquire::https::Timeout=30 \
-            -o Dir::Etc::sourcelist=sources.list \
-            -o Dir::Etc::sourceparts=- \
-            update
+          sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
@@ -163,31 +142,6 @@ jobs:
             patchelf \
             xdg-utils \
             xvfb
-      - name: Ensure rustup is available
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v rustup >/dev/null 2>&1; then
-            rustup_init="$RUNNER_TEMP/rustup-init"
-            curl \
-              --http1.1 \
-              --proto '=https' \
-              --tlsv1.2 \
-              --retry 5 \
-              --retry-all-errors \
-              --connect-timeout 15 \
-              --max-time 60 \
-              --fail \
-              --silent \
-              --show-error \
-              --location \
-              --output "$rustup_init" \
-              https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
-            chmod +x "$rustup_init"
-            "$rustup_init" --default-toolchain none -y
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -241,12 +195,12 @@ jobs:
           chmod +x "$install_dir/Kernex.AppImage"
           cd "$install_dir"
           set +e
-          timeout 20s xvfb-run -a env -i \
+          timeout 20s env -i \
             HOME="$install_dir/home" \
             PATH="/usr/local/bin:/usr/bin:/bin" \
             XDG_RUNTIME_DIR="$install_dir/runtime" \
             APPIMAGE_EXTRACT_AND_RUN=1 \
-            ./Kernex.AppImage >smoke.log 2>&1
+            xvfb-run -a ./Kernex.AppImage >smoke.log 2>&1
           smoke_status=$?
           set -e
           if [[ "$smoke_status" -ne 124 ]]; then
@@ -376,17 +330,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
           persist-credentials: false
-      - name: Select release commit
-        shell: bash
-        env:
-          RELEASE_TARGET: ${{ needs.prepare.outputs.target }}
-        run: |
-          set -euo pipefail
-          if [[ "${ACT:-}" != "true" ]]; then
-            git checkout --detach "$RELEASE_TARGET"
-          fi
+          ref: ${{ needs.prepare.outputs.target }}
       - uses: actions/download-artifact@v8
         with:
           pattern: Kernex-${{ needs.prepare.outputs.version }}-*
