@@ -22,6 +22,19 @@ API-key input is hidden. Keyring-backed profiles store the value through Windows
 
 Custom OpenAI-compatible header credentials can still be mapped from environment variables with `--header-env HEADER=ENVIRONMENT_VARIABLE`. Literal header secrets are not accepted in project configuration.
 
+## ChatGPT subscription access through Codex
+
+The `codex` provider uses the installed Codex CLI's App Server and managed ChatGPT OAuth flow. Kernex does not request an OAuth client ID, handle an access or refresh token, or copy credentials into its keyring. Start the browser flow and then discover the models available to the signed-in plan:
+
+```bash
+kernex auth login --provider codex --method o-auth
+kernex auth status
+kernex models --discover
+kernex run --provider codex --model MODEL "Review this project"
+```
+
+Keep Kernex running until the browser callback completes. `kernex auth status` reports the account email and plan when available; the desktop Authentication tab also reports the current App Server rate-limit window. `kernex auth logout` signs out the Codex-managed account when `codex` is the selected provider. The default executable is `codex`; `KERNEX_CODEX_PATH` can select another trusted Codex CLI installation.
+
 ## Google OAuth with PKCE
 
 Kernex includes Google's official authorization and token endpoints for Gemini. Create an OAuth public-client ID in a Google Cloud project that has the required API enabled, then run:
@@ -39,7 +52,7 @@ The OAuth client's redirect configuration must permit a loopback redirect for an
 
 ## Other providers and custom OAuth
 
-Kernex does not copy private sign-in flows from OpenAI, Anthropic, or other coding applications. Use API credentials when a provider does not publish a third-party installed-app OAuth flow.
+Outside the official Codex App Server integration, Kernex does not copy private sign-in flows from OpenAI, Anthropic, or other coding applications. Use API credentials when a provider does not publish a third-party installed-app OAuth flow.
 
 The `custom` adapter accepts explicit authorization/token URLs and scopes for a provider that documents an official OAuth 2.0 public-client PKCE flow:
 
@@ -55,7 +68,7 @@ Verify those values against the provider's documentation. Kernex never scrapes a
 
 ## Desktop controls
 
-Open Settings, then Authentication. The same named profiles can be created from an API key, environment variable, or supported OAuth flow, selected for the active provider, and removed. Profiles created in either interface are immediately available to the other.
+Open Settings, then Authentication. For `codex`, use the dedicated ChatGPT sign-in, plan, usage, and sign-out controls. The other providers use the same named keyring, environment, or PKCE profiles in both interfaces.
 
 ## Troubleshooting
 

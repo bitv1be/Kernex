@@ -96,23 +96,20 @@ jobs:
         include:
           - os: ubuntu-22.04
             platform: linux-x86_64
-            bundles: appimage
+            bundles: appimage,deb,rpm
             rust_target: x86_64-unknown-linux-gnu
             bundle_dir: target/x86_64-unknown-linux-gnu/release/bundle
-            tauri_script: ../../node_modules/.bin/tauri
           - os: windows-latest
             platform: windows-x86_64
             bundles: nsis,msi
             rust_target: x86_64-pc-windows-msvc
             bundle_dir: target/x86_64-pc-windows-msvc/release/bundle
-            tauri_script: ../../node_modules/.bin/tauri.cmd
           - os: macos-latest
             platform: macos-universal
             bundles: app,dmg
             rust_target: universal-apple-darwin
             bundle_dir: target/universal-apple-darwin/release/bundle
             rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
-            tauri_script: ../../node_modules/.bin/tauri
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     permissions:
@@ -124,10 +121,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.prepare.outputs.target }}
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
       - name: Install Tauri system dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -151,37 +145,57 @@ jobs:
         with:
           workspaces: ". -> target"
       - name: Install frontend dependencies
-        run: npm ci
+        run: bun install --frozen-lockfile
+        working-directory: crates/kernex-desktop
       - name: Create release version overlay
         run: >-
-          node -e "require('node:fs').writeFileSync('crates/kernex-desktop/tauri.release.json',
-          JSON.stringify({ version: process.env.KERNEX_RELEASE_VERSION }))"
+          bun -e "await Bun.write('crates/kernex-desktop/tauri.release.json',
+          JSON.stringify({ version: Bun.env.KERNEX_RELEASE_VERSION }))"
       - name: Build production installers
         uses: tauri-apps/tauri-action@v1
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         with:
           projectPath: crates/kernex-desktop
-          tauriScript: ${{ matrix.tauri_script }}
+          tauriScript: bun tauri
           args: >-
             --config ./tauri.release.json
             --target ${{ matrix.rust_target }}
             --bundles ${{ matrix.bundles }}
 
-      - name: Stage Linux AppImage
+      - name: Stage Linux packages
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          bundle_dir="${{ matrix.bundle_dir }}/appimage"
-          mapfile -t appimages < <(find "$bundle_dir" -maxdepth 1 -type f -name '*.AppImage')
+          bundle_dir="${{ matrix.bundle_dir }}"
+          mapfile -t appimages < <(find "$bundle_dir/appimage" -maxdepth 1 -type f -name '*.AppImage')
+          mapfile -t debs < <(find "$bundle_dir/deb" -maxdepth 1 -type f -name '*.deb')
+          mapfile -t rpms < <(find "$bundle_dir/rpm" -maxdepth 1 -type f -name '*.rpm')
           if [[ "${#appimages[@]}" -ne 1 ]]; then
             printf 'Expected exactly one AppImage, found %s\n' "${#appimages[@]}" >&2
             exit 1
           fi
+          if [[ "${#debs[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one DEB package, found %s\n' "${#debs[@]}" >&2
+            exit 1
+          fi
+          if [[ "${#rpms[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one RPM package, found %s\n' "${#rpms[@]}" >&2
+            exit 1
+          fi
           mkdir dist
           cp "${appimages[0]}" "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.AppImage"
+          cp "${debs[0]}" "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.deb"
+          cp "${rpms[0]}" "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.rpm"
           chmod +x "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.AppImage"
+          portable_dir="$RUNNER_TEMP/kernex-linux-portable"
+          mkdir "$portable_dir"
+          cp "target/${{ matrix.rust_target }}/release/kernex-desktop" "$portable_dir/Kernex"
+          chmod +x "$portable_dir/Kernex"
+          tar -C "$portable_dir" -czf \
+            "dist/Kernex-$KERNEX_RELEASE_VERSION-linux-x86_64.tar.gz" \
+            Kernex
 
       - name: Install and smoke test Linux AppImage
         if: runner.os == 'Linux'
@@ -226,6 +240,15 @@ jobs:
           New-Item -ItemType Directory -Path dist | Out-Null
           Copy-Item $nsis[0].FullName "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64-setup.exe"
           Copy-Item $msi[0].FullName "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64.msi"
+          $portableDir = Join-Path $env:RUNNER_TEMP "kernex-windows-portable"
+          New-Item -ItemType Directory -Path $portableDir | Out-Null
+          $binary = "target/${{ matrix.rust_target }}/release/kernex-desktop.exe"
+          Copy-Item $binary (Join-Path $portableDir "Kernex.exe")
+          $archive = "dist/Kernex-$env:KERNEX_RELEASE_VERSION-windows-x86_64.tar.gz"
+          & tar.exe -C $portableDir -czf $archive Kernex.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not create portable Windows archive"
+          }
 
       - name: Install and smoke test Windows package
         if: runner.os == 'Windows'
@@ -323,6 +346,7 @@ jobs:
     permissions:
       actions: read
       contents: write
+      id-token: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
@@ -350,6 +374,20 @@ jobs:
             sha256sum --check SHA256SUMS
           )
           .github/scripts/verify-release-assets.sh dist "$RELEASE_VERSION"
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+      - name: Sign and verify release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(dist/Kernex-* dist/SHA256SUMS)
+          for asset in "${assets[@]}"; do
+            cosign sign-blob --yes --bundle "$asset.sig" "$asset"
+          done
+          .github/scripts/verify-release-signatures.sh \
+            dist \
+            "$RELEASE_VERSION" \
+            "https://github.com/$GITHUB_WORKFLOW_REF"
       - name: Upload complete draft release
         shell: bash
         run: |
@@ -385,8 +423,11 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --dir remote-release \
             --pattern 'Kernex-*' \
-            --pattern SHA256SUMS
-          .github/scripts/verify-release-assets.sh remote-release "$RELEASE_VERSION"
+            --pattern 'SHA256SUMS*'
+          .github/scripts/verify-release-signatures.sh \
+            remote-release \
+            "$RELEASE_VERSION" \
+            "https://github.com/$GITHUB_WORKFLOW_REF"
       - name: Publish verified release
         shell: bash
         run: |

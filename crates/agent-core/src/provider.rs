@@ -27,6 +27,7 @@ const PROVIDER_REQUEST_TIMEOUT_SECONDS: u64 = 600;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
+    Codex,
     OpenAiCompatible,
     Anthropic,
     Gemini,
@@ -35,7 +36,8 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
+        Self::Codex,
         Self::OpenAiCompatible,
         Self::Anthropic,
         Self::Gemini,
@@ -47,6 +49,7 @@ impl ProviderKind {
 impl fmt::Display for ProviderKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::Codex => "codex",
             Self::OpenAiCompatible => "openai-compatible",
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
@@ -61,6 +64,7 @@ impl FromStr for ProviderKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
+            "codex" | "chatgpt" | "openai-subscription" => Ok(Self::Codex),
             "openai" | "openai-compatible" | "open_ai_compatible" => Ok(Self::OpenAiCompatible),
             "anthropic" | "claude" => Ok(Self::Anthropic),
             "gemini" | "google" => Ok(Self::Gemini),
@@ -89,6 +93,7 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     pub fn for_kind(kind: ProviderKind, model: impl Into<String>) -> Self {
         let (base_url, api_key_env) = match kind {
+            ProviderKind::Codex => (String::new(), None),
             ProviderKind::OpenAiCompatible => (
                 "https://api.openai.com/v1".to_owned(),
                 Some("OPENAI_API_KEY".to_owned()),
@@ -115,11 +120,15 @@ impl ProviderConfig {
     }
 
     pub fn endpoint(&self) -> Result<String, ProviderError> {
+        if self.kind == ProviderKind::Codex {
+            return Err(ProviderError::NotHttpProvider(self.kind));
+        }
         if self.base_url.trim().is_empty() {
             return Err(ProviderError::MissingBaseUrl(self.kind));
         }
         let base = self.base_url.trim_end_matches('/');
         match self.kind {
+            ProviderKind::Codex => Err(ProviderError::NotHttpProvider(self.kind)),
             ProviderKind::OpenAiCompatible | ProviderKind::Local | ProviderKind::Custom => {
                 Ok(format!("{base}/chat/completions"))
             }
@@ -256,6 +265,8 @@ pub enum ProviderError {
     UnknownKind(String),
     #[error("provider {0} requires a base URL")]
     MissingBaseUrl(ProviderKind),
+    #[error("provider {0} is not an HTTP completion provider")]
+    NotHttpProvider(ProviderKind),
     #[error("model name cannot be empty")]
     MissingModel,
     #[error("API key environment variable is not set: {0}")]
@@ -289,6 +300,10 @@ pub type ProviderModelsFuture<'a> =
 pub struct ProviderModel {
     pub id: String,
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub is_default: bool,
     pub owned_by: Option<String>,
     pub input_token_limit: Option<u64>,
     pub output_token_limit: Option<u64>,
@@ -563,6 +578,9 @@ impl HttpModelProvider {
 
         let mut builder = builder.headers(headers);
         match self.config.kind {
+            ProviderKind::Codex => {
+                return Err(ProviderError::NotHttpProvider(self.config.kind));
+            }
             ProviderKind::Anthropic => {
                 builder = builder.header("anthropic-version", "2023-06-01");
                 if let Some((credential, kind)) = credential {
@@ -770,6 +788,7 @@ impl StreamAccumulator {
         sink: &Arc<dyn ProviderStreamSink>,
     ) -> Result<(), ProviderError> {
         match kind {
+            ProviderKind::Codex => Err(ProviderError::NotHttpProvider(kind)),
             ProviderKind::OpenAiCompatible | ProviderKind::Local | ProviderKind::Custom => {
                 self.consume_openai(value, sink)
             }
@@ -1095,6 +1114,7 @@ impl ModelProvider for HttpModelProvider {
 
 fn parse_models(kind: ProviderKind, value: Value) -> Result<Vec<ProviderModel>, ProviderError> {
     let models = match kind {
+        ProviderKind::Codex => None,
         ProviderKind::Gemini => value.get("models"),
         ProviderKind::OpenAiCompatible
         | ProviderKind::Anthropic
@@ -1120,6 +1140,15 @@ fn parse_models(kind: ProviderKind, value: Value) -> Result<Vec<ProviderModel>, 
                     .or_else(|| model.get("displayName"))
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                description: model
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                is_default: model
+                    .get("is_default")
+                    .or_else(|| model.get("isDefault"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 owned_by: model
                     .get("owned_by")
                     .and_then(Value::as_str)
@@ -1141,6 +1170,7 @@ fn parse_models(kind: ProviderKind, value: Value) -> Result<Vec<ProviderModel>, 
 
 fn request_payload(config: &ProviderConfig, request: &CompletionRequest) -> Value {
     match config.kind {
+        ProviderKind::Codex => json!({}),
         ProviderKind::OpenAiCompatible | ProviderKind::Local | ProviderKind::Custom => {
             let messages: Vec<_> = request.messages.iter().map(openai_message).collect();
             let tools: Vec<_> = request
@@ -1348,6 +1378,7 @@ fn gemini_message(message: &Message) -> Value {
 
 fn parse_response(kind: ProviderKind, value: Value) -> Result<CompletionResponse, ProviderError> {
     match kind {
+        ProviderKind::Codex => Err(ProviderError::NotHttpProvider(kind)),
         ProviderKind::OpenAiCompatible | ProviderKind::Local | ProviderKind::Custom => {
             let content = value
                 .pointer("/choices/0/message/content")
@@ -1519,6 +1550,10 @@ mod tests {
             "ollama".parse::<ProviderKind>().unwrap(),
             ProviderKind::Local
         );
+        assert_eq!(
+            "chatgpt".parse::<ProviderKind>().unwrap(),
+            ProviderKind::Codex
+        );
     }
 
     #[test]
@@ -1526,6 +1561,12 @@ mod tests {
         let config = ProviderConfig::for_kind(ProviderKind::Gemini, "gemini-test");
         assert_eq!(config.api_key_env.as_deref(), Some("GEMINI_API_KEY"));
         assert!(config.endpoint().unwrap().contains("gemini-test"));
+        let codex = ProviderConfig::for_kind(ProviderKind::Codex, "gpt-test");
+        assert!(codex.api_key_env.is_none());
+        assert!(matches!(
+            codex.endpoint(),
+            Err(ProviderError::NotHttpProvider(ProviderKind::Codex))
+        ));
     }
 
     #[test]

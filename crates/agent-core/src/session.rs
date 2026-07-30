@@ -50,6 +50,9 @@ pub struct SessionRecord {
     pub workspace_path: String,
     pub provider: String,
     pub model: String,
+    /// Conversation identifier owned by a delegated provider runtime, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_thread_id: Option<String>,
     pub messages: Vec<Message>,
     pub tool_calls: Vec<ToolCall>,
     pub tool_results: Vec<ToolResultRecord>,
@@ -73,6 +76,7 @@ impl SessionRecord {
             workspace_path: workspace_path.into(),
             provider: provider.into(),
             model: model.into(),
+            provider_thread_id: None,
             messages: Vec::new(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
@@ -147,6 +151,9 @@ impl SessionRecorder {
         let mut session = self.session.lock().map_err(|_| SessionError::Unavailable)?;
         session.messages.clone_from(&result.messages);
         session.token_usage.clone_from(&result.token_usage);
+        session
+            .provider_thread_id
+            .clone_from(&result.provider_thread_id);
         session.status = SessionStatus::Completed;
         self.store.save(&mut session)
     }

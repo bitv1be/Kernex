@@ -6,12 +6,14 @@ use thiserror::Error;
 
 use crate::agent::{AgentEngine, AgentError, AgentRunResult, EventSink, Toolbox};
 use crate::auth::{AuthError, AuthManager, AuthMethod};
+use crate::codex_app_server::{CodexAppServerError, CodexTurnConfig, run_codex_turn};
 use crate::config::{ConfigError, KernexConfig};
 use crate::permission::{
-    Approver, PermissionGate, PermissionMode, PermissionPolicy, ProjectGrantStore,
+    Approver, PermissionDecision, PermissionGate, PermissionMode, PermissionPolicy,
+    PermissionRequest, ProjectGrantStore,
 };
 use crate::provider::{
-    HttpModelProvider, Message, ProviderConfig, ProviderCredentialKind, ProviderError,
+    HttpModelProvider, Message, ProviderConfig, ProviderCredentialKind, ProviderError, ProviderKind,
 };
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -21,6 +23,8 @@ pub struct AgentRunConfig {
     pub provider: ProviderConfig,
     pub permission_mode: PermissionMode,
     pub max_steps: usize,
+    /// Provider-owned conversation identifier used when resuming delegated runtimes.
+    pub provider_thread_id: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -39,6 +43,8 @@ pub enum RuntimeError {
     Tool(#[from] crate::agent::ToolError),
     #[error(transparent)]
     Agent(#[from] AgentError),
+    #[error(transparent)]
+    CodexAppServer(#[from] CodexAppServerError),
 }
 
 /// Resolves a configured authentication profile and builds a permissioned HTTP provider.
@@ -88,7 +94,28 @@ pub async fn run_agent_turn(
         project_scope,
         project_grants,
     ));
-
+    if config.provider.kind == ProviderKind::Codex {
+        let result = run_codex_turn(
+            CodexTurnConfig {
+                workspace: workspace.root().to_path_buf(),
+                model: config.provider.model,
+                permission_mode: config.permission_mode,
+                provider_thread_id: config.provider_thread_id,
+            },
+            task,
+            history,
+            Arc::new(GateApprover(permissions)),
+            events,
+            cancelled,
+        )
+        .await;
+        return match result {
+            Ok(result) => Ok(result),
+            Err(CodexAppServerError::Cancelled) => Err(AgentError::Cancelled.into()),
+            Err(CodexAppServerError::EmptyTask) => Err(AgentError::EmptyTask.into()),
+            Err(error) => Err(error.into()),
+        };
+    }
     let provider = prepare_http_provider(config.provider.clone(), permissions.clone()).await?;
 
     let extension_config = KernexConfig::load(&workspace)?;
@@ -103,4 +130,17 @@ pub async fn run_agent_turn(
         .run_with_history(task, history)
         .await
         .map_err(RuntimeError::from)
+}
+
+/// Applies Kernex's session/project grant semantics before answering an App Server approval.
+struct GateApprover(Arc<PermissionGate>);
+
+impl Approver for GateApprover {
+    fn decide(&self, request: &PermissionRequest) -> PermissionDecision {
+        if self.0.authorize(request).is_ok() {
+            PermissionDecision::AllowOnce
+        } else {
+            PermissionDecision::Deny
+        }
+    }
 }

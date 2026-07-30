@@ -230,7 +230,10 @@ fn classify_risk(program: &str, args: &[String]) -> RiskLevel {
     ) {
         return RiskLevel::High;
     }
-    if matches!(name.as_str(), "cargo" | "npm" | "pnpm" | "yarn" | "make") {
+    if matches!(
+        name.as_str(),
+        "cargo" | "bun" | "npm" | "pnpm" | "yarn" | "make"
+    ) {
         return RiskLevel::Medium;
     }
     RiskLevel::Low
@@ -297,6 +300,14 @@ mod tests {
         assert_eq!(
             CommandSpec::new("sh", ["-c", "echo hello"]).risk(),
             RiskLevel::High
+        );
+    }
+
+    #[test]
+    fn package_manager_commands_are_medium_risk() {
+        assert_eq!(
+            CommandSpec::new("bun", ["run", "build"]).risk(),
+            RiskLevel::Medium
         );
     }
 

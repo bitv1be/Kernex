@@ -1,0 +1,21 @@
+[package]
+name = "kernex-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Kernex desktop host"
+
+[lib]
+name = "kernex_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+agent-core = { package = "kernex-agent-core", path = "../../agent-core" }
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+tauri-plugin-dialog.workspace = true
+tokio.workspace = true

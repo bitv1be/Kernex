@@ -54,7 +54,7 @@ impl Default for KernexSettings {
             provider: ProviderSettings::default(),
             permission_mode: PermissionMode::AutoSafe,
             recent_projects: Vec::new(),
-            theme: "system".into(),
+            theme: "dark".into(),
         }
     }
 }
@@ -148,5 +148,10 @@ mod tests {
         assert_eq!(restored.recent_projects, ["/workspace"]);
 
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn desktop_theme_defaults_to_dark() {
+        assert_eq!(KernexSettings::default().theme, "dark");
     }
 }
